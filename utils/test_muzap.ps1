@@ -36,10 +36,12 @@ function Set-IpsetMode {
 
 trap {
     Write-Host "[ERROR] Script interrupted. Restoring ipset..." -ForegroundColor Red
-    if ($originalIpsetStatus -and $originalIpsetStatus -ne "any") {
+    if ((Get-Variable -Name 'originalIpsetStatus' -ErrorAction SilentlyContinue) -and $originalIpsetStatus -ne "any") {
         Set-IpsetMode -mode "restore"
     }
-    Remove-Item -Path $ipsetFlagFile -ErrorAction SilentlyContinue
+    if (Get-Variable -Name 'ipsetFlagFile' -ErrorAction SilentlyContinue) {
+        Remove-Item -Path $ipsetFlagFile -ErrorAction SilentlyContinue
+    }
     break
 }
 
