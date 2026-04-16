@@ -1,2 +1,20 @@
+# Auto detect text files and perform normalisation
+* text=auto
+
+# Force Windows line endings for scripts
 *.bat text eol=crlf
 *.ps1 text eol=crlf
+*.ini text eol=crlf
+
+# Standard text files
+*.txt text
+*.md text
+*.gitattributes text
+*.gitignore text
+
+# Binary files (no diff, no normalisation)
+*.exe binary
+*.dll binary
+*.sys binary
+*.bin binary
+*.zip binary

@@ -1,9 +1,10 @@
 @echo off
-set "LOCAL_VERSION=1.9.7b"
+set "LOCAL_VERSION=0.0.0"
+if exist "%~dp0.service\version.txt" set /p LOCAL_VERSION=<"%~dp0.service\version.txt"
 
 :: External commands
 if "%~1"=="status_zapret" (
-    call :test_service zapret soft
+    call :test_service MuZap soft
     call :tcp_enable
     exit /b
 )
@@ -13,7 +14,7 @@ if "%~1"=="check_updates" (
 
     if exist "%~dp0utils\check_updates.enabled" (
         if not "%~2"=="soft" (
-            start /b service check_updates soft
+            start /b MuZap check_updates soft
         ) else (
             call :service_check_updates soft
         )
@@ -62,7 +63,7 @@ call :check_updates_switch_status
 set "menu_choice=null"
 
 echo.
-echo   ZAPRET SERVICE MANAGER v!LOCAL_VERSION!
+echo   MUZAP SERVICE MANAGER v!LOCAL_VERSION!
 echo   ----------------------------------------
 echo.
 echo   :: SERVICE
@@ -133,12 +134,12 @@ exit /b
 cls
 chcp 437 > nul
 
-sc query "zapret" >nul 2>&1
+sc query "MuZap" >nul 2>&1
 if !errorlevel!==0 (
-    for /f "tokens=2*" %%A in ('reg query "HKLM\System\CurrentControlSet\Services\zapret" /v zapret-discord-youtube 2^>nul') do echo Service strategy installed from "%%B"
+    for /f "tokens=2*" %%A in ('reg query "HKLM\System\CurrentControlSet\Services\MuZap" /v MuZap-strategy 2^>nul') do echo Service strategy installed from "%%B"
 )
 
-call :test_service zapret
+call :test_service MuZap
 call :test_service WinDivert
 
 set "BIN_PATH=%~dp0bin\"
@@ -166,7 +167,7 @@ set "ServiceStatus=%ServiceStatus: =%"
 
 if "%ServiceStatus%"=="RUNNING" (
     if "%~2"=="soft" (
-        echo "%ServiceName%" is ALREADY RUNNING as service, use "service.bat" and choose "Remove Services" first if you want to run standalone bat.
+        echo "%ServiceName%" is ALREADY RUNNING as service, use "service.bat" and choose "Remove Services" first if you want to run standalone.
         pause
         exit /b
     ) else (
@@ -186,7 +187,7 @@ exit /b
 cls
 chcp 65001 > nul
 
-set SRVCNAME=zapret
+set SRVCNAME=MuZap
 sc query "!SRVCNAME!" >nul 2>&1
 if !errorlevel!==0 (
     net stop %SRVCNAME%
@@ -225,133 +226,125 @@ chcp 437 > nul
 cd /d "%~dp0"
 set "BIN_PATH=%~dp0bin\"
 set "LISTS_PATH=%~dp0lists\"
+set "INI_FILE=%~dp0strategies.ini"
 
-:: Searching for .bat files in current folder, except files that start with "service"
-echo Pick one of the options:
-set "count=0"
-for /f "delims=" %%F in ('powershell -NoProfile -Command "Get-ChildItem -LiteralPath '.' -Filter '*.bat' | Where-Object { $_.Name -notlike 'service*' } | Sort-Object { [Regex]::Replace($_.Name, '(\d+)', { $args[0].Value.PadLeft(8, '0') }) } | ForEach-Object { $_.Name }"') do (
-    set /a count+=1
-    echo !count!. %%F
-    set "file!count!=%%F"
+if not exist "%INI_FILE%" (
+    call :PrintRed "strategies.ini NOT found in root directory."
+    pause
+    goto menu
 )
 
-:: Choosing file
+:: Load game filter variables first so they can be substituted
+call :game_switch_status
+
+echo Pick one of the strategies from strategies.ini:
+set "count=0"
+set "CUR_SEC="
+
+for /f "usebackq tokens=1,* delims==" %%A in ("%INI_FILE%") do (
+    set "KEY=%%A"
+    for /f "tokens=* delims= " %%a in ("!KEY!") do set "KEY=%%a"
+    
+    if "!KEY:~0,1!"=="[" (
+        set /a count+=1
+        set "CUR_SEC=!KEY:~1,-1!"
+        set "section!count!=!CUR_SEC!"
+        set "desc!count!=No description"
+    ) else if /i "!KEY!"=="Description" (
+        if defined CUR_SEC set "desc!count!=%%B"
+    )
+)
+
+for /l %%i in (1,1,!count!) do (
+    echo %%i. [!section%%i!] - !desc%%i!
+)
+
+:: Choosing strategy
 set "choice="
-set /p "choice=Input file index (number): "
+set /p "choice=Input strategy index (number): "
 if "!choice!"=="" (
     echo The choice is empty, exiting...
     pause
     goto menu
 )
 
-set "selectedFile=!file%choice%!"
-if not defined selectedFile (
+set "selectedSection=!section%choice%!"
+if not defined selectedSection (
     echo Invalid choice, exiting...
     pause
     goto menu
 )
 
-:: Args that should be followed by value
-set "args_with_value=sni host altorder"
-
-:: Parsing args (mergeargs: 2=start param|3=arg with value|1=params args|0=default)
-set "args="
-set "capture=0"
-set "mergeargs=0"
-set QUOTE="
-
-for /f "tokens=*" %%a in ('type "!selectedFile!"') do (
-    set "line=%%a"
-    call set "line=%%line:^!=EXCL_MARK%%"
-
-    echo !line! | findstr /i "%BIN%winws.exe" >nul
-    if not errorlevel 1 (
-        set "capture=1"
-    )
-
-    if !capture!==1 (
-        if not defined args (
-            set "line=!line:*%BIN%winws.exe"=!"
+:: Find and read the Params for selectedSection
+set "STRATEGY_PARAMS="
+set "READING=0"
+for /f "usebackq tokens=1,* delims==" %%A in ("%INI_FILE%") do (
+    set "KEY=%%A"
+    for /f "tokens=* delims= " %%a in ("!KEY!") do set "KEY=%%a"
+    
+    if "!KEY:~0,1!"=="[" (
+        set "CUR_READ_SEC=!KEY:~1,-1!"
+        if /i "!CUR_READ_SEC!"=="!selectedSection!" (
+            set "READING=1"
+        ) else (
+            set "READING=0"
         )
-
-        set "temp_args="
-        for %%i in (!line!) do (
-            set "arg=%%i"
-
-            if not "!arg!"=="^" (
-                if "!arg:~0,2!" EQU "--" if not !mergeargs!==0 (
-                    set "mergeargs=0"
-                )
-
-                if "!arg:~0,1!" EQU "!QUOTE!" (
-                    set "arg=!arg:~1,-1!"
-
-                    echo !arg! | findstr ":" >nul
-                    if !errorlevel!==0 (
-                        set "arg=\!QUOTE!!arg!\!QUOTE!"
-                    ) else if "!arg:~0,1!"=="@" (
-                        set "arg=\!QUOTE!@%~dp0!arg:~1!\!QUOTE!"
-                    ) else if "!arg:~0,5!"=="%%BIN%%" (
-                        set "arg=\!QUOTE!!BIN_PATH!!arg:~5!\!QUOTE!"
-                    ) else if "!arg:~0,7!"=="%%LISTS%%" (
-                        set "arg=\!QUOTE!!LISTS_PATH!!arg:~7!\!QUOTE!"
-                    ) else (
-                        set "arg=\!QUOTE!%~dp0!arg!\!QUOTE!"
-                    )
-                ) else if "!arg:~0,12!" EQU "%%GameFilter%%" (
-                    set "arg=%GameFilter%"
-                ) else if "!arg:~0,15!" EQU "%%GameFilterTCP%%" (
-                    set "arg=%GameFilterTCP%"
-                ) else if "!arg:~0,15!" EQU "%%GameFilterUDP%%" (
-                    set "arg=%GameFilterUDP%"
-                )
-
-                if !mergeargs!==1 (
-                    set "temp_args=!temp_args!,!arg!"
-                ) else if !mergeargs!==3 (
-                    set "temp_args=!temp_args!=!arg!"
-                    set "mergeargs=1"
-                ) else (
-                    set "temp_args=!temp_args! !arg!"
-                )
-
-                if "!arg:~0,2!" EQU "--" (
-                    set "mergeargs=2"
-                ) else if !mergeargs! GEQ 1 (
-                    if !mergeargs!==2 set "mergeargs=1"
-
-                    for %%x in (!args_with_value!) do (
-                        if /i "%%x"=="!arg!" (
-                            set "mergeargs=3"
-                        )
-                    )
-                )
-            )
-        )
-
-        if not "!temp_args!"=="" (
-            set "args=!args! !temp_args!"
+    ) else if "!READING!"=="1" (
+        if /i "!KEY!"=="Params" (
+            set "STRATEGY_PARAMS=%%B"
+            set "READING=0"
         )
     )
 )
+
+if not defined STRATEGY_PARAMS (
+    call :PrintRed "Failed to parse Params for [!selectedSection!]"
+    pause
+    goto menu
+)
+
+:: Substitute variables in STRATEGY_PARAMS
+:: We MUST use %%VAR%% to search for the literal text %VAR% and prevent CMD from prematurely evaluating it
+set "ARGS=!STRATEGY_PARAMS:%%BIN%%=%BIN_PATH%!"
+set "ARGS=!ARGS:%%LISTS%%=%LISTS_PATH%!"
+set "ARGS=!ARGS:%%GameFilterTCP%%=%GameFilterTCP%!"
+set "ARGS=!ARGS:%%GameFilterUDP%%=%GameFilterUDP%!"
 
 :: Creating service with parsed args
 call :tcp_enable
 
-set ARGS=%args%
-call set "ARGS=%%ARGS:EXCL_MARK=^!%%"
-echo Final args: !ARGS!
-set SRVCNAME=zapret
+set SRVCNAME=MuZap
 
 net stop %SRVCNAME% >nul 2>&1
 sc delete %SRVCNAME% >nul 2>&1
-sc create %SRVCNAME% binPath= "\"%BIN_PATH%winws.exe\" !ARGS!" DisplayName= "zapret" start= auto
-sc description %SRVCNAME% "Zapret DPI bypass software"
+
+:: 1. Create service with minimal path to avoid sc.exe length truncation
+sc create %SRVCNAME% binPath= "\"%BIN_PATH%winws.exe\"" DisplayName= "MuZap" start= auto >nul 2>&1
+sc description %SRVCNAME% "MuZap DPI bypass software" >nul 2>&1
+
+:: 2. Overwrite ImagePath directly in registry to bypass sc.exe length limits and safely handle EXCL_MARK
+setlocal disabledelayedexpansion
+:: Replace EXCL_MARK with ^! and escape quotes for registry
+set "ESCAPED_ARGS=%ARGS:EXCL_MARK=^!%"
+set "ESCAPED_ARGS=%ESCAPED_ARGS:"=\"%"
+
+reg add "HKLM\System\CurrentControlSet\Services\MuZap" /v ImagePath /t REG_EXPAND_SZ /d "\"%BIN_PATH%winws.exe\" %ESCAPED_ARGS%" /f >nul 2>&1
+
+:: Build debug string
+set "DEBUG_ARGS=%ARGS:EXCL_MARK=!%"
+
+echo:
+echo [DEBUG] Final command line for service:
+echo "%BIN_PATH%winws.exe" %DEBUG_ARGS%
+echo:
+echo If the service stopped immediately, copy the debug line above and run it manually in cmd to see the error.
+endlocal
+
+:: 3. Save strategy name
+reg add "HKLM\System\CurrentControlSet\Services\MuZap" /v MuZap-strategy /t REG_SZ /d "!selectedSection!" /f >nul 2>&1
+
+:: Start the service
 sc start %SRVCNAME%
-for %%F in ("!file%choice%!") do (
-    set "filename=%%~nF"
-)
-reg add "HKLM\System\CurrentControlSet\Services\zapret" /v zapret-discord-youtube /t REG_SZ /d "!filename!" /f
 
 pause
 goto menu
@@ -363,16 +356,16 @@ chcp 437 > nul
 cls
 
 :: Set current version and URLs
-set "GITHUB_VERSION_URL=https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/version.txt"
-set "GITHUB_RELEASE_URL=https://github.com/Flowseal/zapret-discord-youtube/releases/tag/"
-set "GITHUB_DOWNLOAD_URL=https://github.com/Flowseal/zapret-discord-youtube/releases/latest"
+set "GITHUB_VERSION_URL=https://raw.githubusercontent.com/MuXolotl/MuZap/main/.service/version.txt"
+set "GITHUB_RELEASE_URL=https://github.com/MuXolotl/MuZap/releases/tag/"
+set "GITHUB_DOWNLOAD_URL=https://github.com/MuXolotl/MuZap/releases/latest"
 
 :: Get the latest version from GitHub
 for /f "delims=" %%A in ('powershell -NoProfile -Command "(Invoke-WebRequest -Uri \"%GITHUB_VERSION_URL%\" -Headers @{\"Cache-Control\"=\"no-cache\"} -UseBasicParsing -TimeoutSec 5).Content.Trim()" 2^>nul') do set "GITHUB_VERSION=%%A"
 
 :: Error handling
 if not defined GITHUB_VERSION (
-    echo Warning: failed to fetch the latest version. This warning does not affect the operation of zapret
+    echo Warning: failed to fetch the latest version. This warning does not affect the operation of MuZap
     timeout /T 9
     if "%1"=="soft" exit 
     goto menu
@@ -410,7 +403,7 @@ sc query BFE | findstr /I "RUNNING" > nul
 if !errorlevel!==0 (
     call :PrintGreen "Base Filtering Engine check passed"
 ) else (
-    call :PrintRed "[X] Base Filtering Engine is not running. This service is required for zapret to work"
+    call :PrintRed "[X] Base Filtering Engine is not running. This service is required for MuZap to work"
 )
 echo:
 
@@ -453,7 +446,6 @@ echo:
 tasklist /FI "IMAGENAME eq AdguardSvc.exe" | find /I "AdguardSvc.exe" > nul
 if !errorlevel!==0 (
     call :PrintRed "[X] Adguard process found. Adguard may cause problems with Discord"
-    call :PrintRed "https://github.com/Flowseal/zapret-discord-youtube/issues/417"
 ) else (
     call :PrintGreen "Adguard check passed"
 )
@@ -462,8 +454,7 @@ echo:
 :: Killer
 sc query | findstr /I "Killer" > nul
 if !errorlevel!==0 (
-    call :PrintRed "[X] Killer services found. Killer conflicts with zapret"
-    call :PrintRed "https://github.com/Flowseal/zapret-discord-youtube/issues/2512#issuecomment-2821119513"
+    call :PrintRed "[X] Killer services found. Killer conflicts with MuZap"
 ) else (
     call :PrintGreen "Killer check passed"
 )
@@ -472,8 +463,7 @@ echo:
 :: Intel Connectivity Network Service
 sc query | findstr /I "Intel" | findstr /I "Connectivity" | findstr /I "Network" > nul
 if !errorlevel!==0 (
-    call :PrintRed "[X] Intel Connectivity Network Service found. It conflicts with zapret"
-    call :PrintRed "https://github.com/ValdikSS/GoodbyeDPI/issues/541#issuecomment-2661670982"
+    call :PrintRed "[X] Intel Connectivity Network Service found. It conflicts with MuZap"
 ) else (
     call :PrintGreen "Intel Connectivity check passed"
 )
@@ -492,7 +482,7 @@ if !errorlevel!==0 (
 )
 
 if !checkpointFound!==1 (
-    call :PrintRed "[X] Check Point services found. Check Point conflicts with zapret"
+    call :PrintRed "[X] Check Point services found. Check Point conflicts with MuZap"
     call :PrintRed "Try to uninstall Check Point"
 ) else (
     call :PrintGreen "Check Point check passed"
@@ -502,7 +492,7 @@ echo:
 :: SmartByte
 sc query | findstr /I "SmartByte" > nul
 if !errorlevel!==0 (
-    call :PrintRed "[X] SmartByte services found. SmartByte conflicts with zapret"
+    call :PrintRed "[X] SmartByte services found. SmartByte conflicts with MuZap"
     call :PrintRed "Try to uninstall or disable SmartByte through services.msc"
 ) else (
     call :PrintGreen "SmartByte check passed"
@@ -527,7 +517,7 @@ if !errorlevel!==0 (
             set "VPN_SERVICES=!VPN_SERVICES!,%%A"
         )
     )
-    call :PrintYellow "[?] VPN services found:!VPN_SERVICES!. Some VPNs can conflict with zapret"
+    call :PrintYellow "[?] VPN services found:!VPN_SERVICES!. Some VPNs can conflict with MuZap"
     call :PrintYellow "Make sure that all VPNs are disabled"
 ) else (
     call :PrintGreen "VPN check passed"
@@ -771,7 +761,7 @@ if "%GameFilterChoice%"=="0" (
     goto menu
 )
 
-call :PrintYellow "Restart the zapret to apply the changes"
+call :PrintYellow "Restart MuZap to apply the changes"
 pause
 goto menu
 
@@ -878,7 +868,7 @@ chcp 437 > nul
 cls
 
 set "listFile=%~dp0lists\ipset-all.txt"
-set "url=https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/.service/ipset-service.txt"
+set "url=https://raw.githubusercontent.com/MuXolotl/MuZap/main/.service/ipset-service.txt"
 
 echo Updating ipset-all...
 
@@ -906,8 +896,8 @@ chcp 437 > nul
 cls
 
 set "hostsFile=%SystemRoot%\System32\drivers\etc\hosts"
-set "hostsUrl=https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/.service/hosts"
-set "tempFile=%TEMP%\zapret_hosts.txt"
+set "hostsUrl=https://raw.githubusercontent.com/MuXolotl/MuZap/main/.service/hosts"
+set "tempFile=%TEMP%\muzap_hosts.txt"
 set "needsUpdate=0"
 
 echo Checking hosts file...
@@ -984,7 +974,7 @@ if %errorLevel% neq 0 (
 
 echo Starting configuration tests in PowerShell window...
 echo.
-start "" powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0utils\test zapret.ps1"
+start "" powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0utils\test_muzap.ps1"
 pause
 goto menu
 
@@ -1007,7 +997,7 @@ exit /b
 where %1 >nul 2>&1
 if %errorLevel% neq 0 (
     echo [ERROR] %1 not found in PATH
-    echo Fix your PATH variable with instructions here https://github.com/Flowseal/zapret-discord-youtube/issues/7490
+    echo Fix your PATH variable with instructions here https://github.com/MuXolotl/MuZap/issues
     pause
     exit /b 1
 )
@@ -1019,7 +1009,7 @@ set "extracted=1"
 if not exist "%~dp0bin\" set "extracted=0"
 
 if "%extracted%"=="0" (
-    echo Zapret must be extracted from archive first or bin folder not found for some reason
+    echo MuZap must be extracted from archive first or bin folder not found for some reason
     pause
     exit
 )

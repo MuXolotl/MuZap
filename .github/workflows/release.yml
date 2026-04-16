@@ -1,0 +1,47 @@
+name: Manual Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 1.2.0)'
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update version file
+        run: |
+          echo "${{ github.event.inputs.version }}" > .service/version.txt
+
+      - name: Commit version bump
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add .service/version.txt
+          git commit -m "Bump version to ${{ github.event.inputs.version }}"
+          git push
+
+      - name: Create Zip Archive
+        run: |
+          # Archive the entire repo but exclude .git and github workflows directories
+          zip -r MuZap_${{ github.event.inputs.version }}.zip . -x ".git/*" ".github/*"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ github.event.inputs.version }}
+          name: Release v${{ github.event.inputs.version }}
+          files: MuZap_${{ github.event.inputs.version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
