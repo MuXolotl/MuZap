@@ -733,6 +733,8 @@ exit /b
 chcp 437 > nul
 cls
 
+set "gameFlagFile=%~dp0utils\game_filter.enabled"
+
 echo Select game filter mode:
 echo   0. Disable
 echo   1. TCP and UDP
