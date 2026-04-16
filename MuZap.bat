@@ -59,6 +59,7 @@ cls
 call :ipset_switch_status
 call :game_switch_status
 call :check_updates_switch_status
+call :current_strategy_status
 
 set "menu_choice=null"
 
@@ -67,7 +68,7 @@ echo   MUZAP SERVICE MANAGER v!LOCAL_VERSION!
 echo   ----------------------------------------
 echo.
 echo   :: SERVICE
-echo      1. Install Service
+echo      1. Install Service     [!CurrentStrategy!]
 echo      2. Remove Services
 echo      3. Check Status
 echo.
@@ -1011,6 +1012,14 @@ exit /b
 
 :PrintYellow
 powershell -NoProfile -Command "Write-Host \"%~1\" -ForegroundColor Yellow"
+exit /b
+
+:current_strategy_status
+set "CurrentStrategy=not installed"
+sc query "MuZap" >nul 2>&1
+if !errorlevel!==0 (
+    for /f "tokens=2*" %%A in ('reg query "HKLM\System\CurrentControlSet\Services\MuZap" /v MuZap-strategy 2^>nul') do set "CurrentStrategy=%%B"
+)
 exit /b
 
 :check_command
