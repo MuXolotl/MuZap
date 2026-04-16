@@ -1,5 +1,5 @@
 @echo off
-set "LOCAL_VERSION=1.0.0"
+set "LOCAL_VERSION=1.0.1"
 if exist "%~dp0.service\version.txt" set /p LOCAL_VERSION=<"%~dp0.service\version.txt"
 
 :: External commands
