@@ -477,7 +477,7 @@ function Read-ConfigSelection {
             continue
         }
         $selectedIndices = @()
-        $hasErrors = $false
+        $local:hasErrors = $false
         
         foreach ($part in $parts) {
             if ($part -match '^(\d+)-(\d+)$') {
@@ -486,13 +486,13 @@ function Read-ConfigSelection {
                 
                 if ($start -gt $end) {
                     Write-Host "  [WARN] Invalid range '$part' (start > end). Skipping." -ForegroundColor Yellow
-                    $hasErrors = $true
+                    $local:hasErrors = $true
                     continue
                 }
                 
                 if ($start -lt 1 -or $end -gt $allConfigs.Count) {
                     Write-Host "  [WARN] Range '$part' out of bounds (valid: 1-$($allConfigs.Count)). Skipping invalid parts." -ForegroundColor Yellow
-                    $hasErrors = $true
+                    $local:hasErrors = $true
                     $start = [Math]::Max($start, 1)
                     $end = [Math]::Min($end, $allConfigs.Count)
                 }
@@ -518,7 +518,7 @@ function Read-ConfigSelection {
         }
 
         Write-Host "Selected configs: $($valid -join ', ')" -ForegroundColor Green
-        if ($hasErrors) {
+        if ($local:hasErrors) {
             Write-Host "Some entries were skipped due to errors (see warnings above)." -ForegroundColor Yellow
         }
         
