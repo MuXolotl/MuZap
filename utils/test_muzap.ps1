@@ -529,9 +529,9 @@ while ($true) {
     $testType = Read-TestType
     $mode = Read-ModeSelection
     
-    $strategiesToTest = $allStrategies
+    $strategiesToTest = @($allStrategies)
     if ($mode -eq 'select') {
-        $strategiesToTest = Read-ConfigSelection -allConfigs $allStrategies
+        $strategiesToTest = @(Read-ConfigSelection -allConfigs $allStrategies)
     }
 
     # Load targets once for standard mode
@@ -936,9 +936,9 @@ while ($true) {
                     foreach ($line in $targetRes.Lines) {
                         $test = $line.TestLabel
                         $code = $line.Code
-                        $size = $line.SizeKB
+                        $size = "$($line.UpKB)up/$($line.DownKB)down"
                         $status = $line.Status
-                        Add-Content $resultFile "    ${test}: code=${code} size=${size} KB status=${status}"
+                        Add-Content $resultFile "    ${test}: code=${code} buf=${size} KB status=${status}"
                     }
                 }
             }
