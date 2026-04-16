@@ -20,22 +20,34 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Update version file
+      - name: Update version in .service/version.txt
         run: |
           echo "${{ github.event.inputs.version }}" > .service/version.txt
+
+      - name: Inject version into MuZap.bat
+        run: |
+          # This command finds the LOCAL_VERSION line and replaces 0.0.0 (or whatever is there) with your release version
+          sed -i 's/set "LOCAL_VERSION=.*"/set "LOCAL_VERSION=${{ github.event.inputs.version }}"/' MuZap.bat
 
       - name: Commit version bump
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          git add .service/version.txt
+          git add .service/version.txt MuZap.bat
           git commit -m "Bump version to ${{ github.event.inputs.version }}"
           git push
 
       - name: Create Zip Archive
         run: |
-          # Archive the entire repo but exclude .git and github workflows directories
-          zip -r MuZap_${{ github.event.inputs.version }}.zip . -x ".git/*" ".github/*"
+          # Archive the entire repo but exclude dev/repo-specific files and web-only service data
+          zip -r MuZap_${{ github.event.inputs.version }}.zip . \
+            -x ".git/*" \
+            -x ".github/*" \
+            -x ".gitattributes" \
+            -x ".gitignore" \
+            -x "LICENSE" \
+            -x "README.md" \
+            -x ".service/*"
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
