@@ -870,23 +870,41 @@ chcp 437 > nul
 cls
 
 set "listFile=%~dp0lists\ipset-all.txt"
+set "tempFile=%~dp0lists\ipset-all.tmp"
 set "url=https://raw.githubusercontent.com/MuXolotl/MuZap/main/.service/ipset-service.txt"
 
 echo Updating ipset-all...
 
 if exist "%SystemRoot%\System32\curl.exe" (
-    curl -L -o "%listFile%" "%url%"
+    curl -L -f -o "%tempFile%" "%url%"
 ) else (
     powershell -NoProfile -Command ^
         "$url = '%url%';" ^
-        "$out = '%listFile%';" ^
+        "$out = '%tempFile%';" ^
         "$dir = Split-Path -Parent $out;" ^
         "if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null };" ^
         "$res = Invoke-WebRequest -Uri $url -TimeoutSec 10 -UseBasicParsing;" ^
         "if ($res.StatusCode -eq 200) { $res.Content | Out-File -FilePath $out -Encoding UTF8 } else { exit 1 }"
 )
 
-echo Finished
+if not exist "%tempFile%" (
+    call :PrintRed "Error: file was not downloaded."
+    pause
+    goto menu
+)
+
+:: Check that we downloaded an IP list, not an HTML error page
+findstr /R "^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*" "%tempFile%" >nul 2>&1
+if !errorlevel! neq 0 (
+    call :PrintRed "Error: downloaded file contains no IP addresses. Server may have returned an error page."
+    del /f /q "%tempFile%"
+    pause
+    goto menu
+)
+
+:: All good - replace the main file
+move /y "%tempFile%" "%listFile%" >nul 2>&1
+call :PrintGreen "IPSet list updated successfully."
 
 pause
 goto menu
