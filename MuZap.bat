@@ -338,10 +338,10 @@ echo [DEBUG] Final command line for service:
 echo "%BIN_PATH%winws.exe" %DEBUG_ARGS%
 echo:
 echo If the service stopped immediately, copy the debug line above and run it manually in cmd to see the error.
-endlocal
+endlocal & set "selectedSection_=%selectedSection%"
 
 :: 3. Save strategy name
-reg add "HKLM\System\CurrentControlSet\Services\MuZap" /v MuZap-strategy /t REG_SZ /d "!selectedSection!" /f >nul 2>&1
+reg add "HKLM\System\CurrentControlSet\Services\MuZap" /v MuZap-strategy /t REG_SZ /d "%selectedSection_%" /f >nul 2>&1
 
 :: Start the service
 sc start %SRVCNAME%
