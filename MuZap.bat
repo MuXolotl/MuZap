@@ -89,17 +89,18 @@ echo.
 echo   :: UPDATES
 echo      8. Update IPSet List
 echo      9. Update Hosts File
-echo      10. Check for Updates
+echo      10. Remove Hosts Entries
+echo      11. Check for Updates
 echo.
 echo   :: TOOLS
-echo      11. Run Diagnostics
-echo      12. Run Tests
+echo      12. Run Diagnostics
+echo      13. Run Tests
 echo.
 echo   ----------------------------------------
 echo      0. Exit
 echo.
 
-set /p menu_choice=   Select option (0-12):
+set /p menu_choice=   Select option (0-13):
 
 if "%menu_choice%"=="1" goto service_install
 if "%menu_choice%"=="2" goto service_restart
@@ -110,9 +111,10 @@ if "%menu_choice%"=="6" goto ipset_switch
 if "%menu_choice%"=="7" goto check_updates_switch
 if "%menu_choice%"=="8" goto ipset_update
 if "%menu_choice%"=="9" goto hosts_update
-if "%menu_choice%"=="10" goto service_check_updates
-if "%menu_choice%"=="11" goto service_diagnostics
-if "%menu_choice%"=="12" goto run_tests
+if "%menu_choice%"=="10" goto hosts_remove
+if "%menu_choice%"=="11" goto service_check_updates
+if "%menu_choice%"=="12" goto service_diagnostics
+if "%menu_choice%"=="13" goto run_tests
 if "%menu_choice%"=="0" exit /b
 goto menu
 
@@ -451,7 +453,7 @@ for /f "tokens=2*" %%A in ('reg query "HKCU\Software\Microsoft\Windows\CurrentVe
     if "%%B"=="0x1" set "proxyEnabled=1"
 )
 
-if !proxyEnabled!==1 (
+if !proxyEnabled!==0 (
     for /f "tokens=2*" %%A in ('reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyServer 2^>nul ^| findstr /i "ProxyServer"') do (
         set "proxyServer=%%B"
     )
@@ -508,20 +510,15 @@ echo:
 :: Check Point
 set "checkpointFound=0"
 sc query | findstr /I "TracSrvWrapper" > nul
-if !errorlevel!==0 (
-    set "checkpointFound=1"
-)
-
+if !errorlevel!==0 set "checkpointFound=1"
 sc query | findstr /I "EPWD" > nul
-if !errorlevel!==0 (
-    set "checkpointFound=1"
-)
+if !errorlevel!==0 set "checkpointFound=1"
 
-if !checkpointFound!==1 (
-    call :PrintGreen "Check Point check passed"
-) else (
+if !checkpointFound!==0 (
     call :PrintRed "[X] Check Point services found. Check Point conflicts with MuZap"
     call :PrintRed "Try to uninstall Check Point"
+) else (
+    call :PrintGreen "Check Point check passed"
 )
 echo:
 
@@ -585,21 +582,26 @@ if exist "%hostsFile%" (
         call :PrintYellow "[?] Your hosts file contains entries for youtube.com or youtu.be. This may cause problems with YouTube access"
     )
 )
+echo:
 
-:: WinDivert conflict
+:: WinDivert conflict handling
 tasklist /FI "IMAGENAME eq winws.exe" | find /I "winws.exe" > nul
 set "winws_running=!errorlevel!"
 
 sc query "WinDivert" | findstr /I "RUNNING STOP_PENDING" > nul
 set "windivert_running=!errorlevel!"
 
+:: If winws.exe is NOT running (errorlevel!=0) but WinDivert service IS active (errorlevel==0)
 if !winws_running! neq 0 if !windivert_running!==0 (
     call :PrintYellow "[?] winws.exe is not running but WinDivert service is active. Attempting to delete WinDivert..."
 
     net stop "WinDivert" >nul 2>&1
     sc delete "WinDivert" >nul 2>&1
+
     sc query "WinDivert" >nul 2>&1
     if !errorlevel!==0 (
+        call :PrintGreen "WinDivert successfully removed"
+    ) else (
         call :PrintRed "[X] Failed to delete WinDivert. Checking for conflicting services..."
 
         set "conflicting_services=GoodbyeDPI"
@@ -612,30 +614,29 @@ if !winws_running! neq 0 if !windivert_running!==0 (
                 net stop "%%s" >nul 2>&1
                 sc delete "%%s" >nul 2>&1
                 if !errorlevel!==0 (
-                    call :PrintGreen "Successfully removed service: %%s"
-                ) else (
                     call :PrintRed "[X] Failed to remove service: %%s"
+                ) else (
+                    call :PrintGreen "Successfully removed service: %%s"
                 )
                 set "found_conflict=1"
             )
         )
 
         if !found_conflict!==0 (
-            call :PrintRed "[X] No conflicting services found. Check manually if any other bypass is using WinDivert."
-        ) else (
             call :PrintYellow "[?] Attempting to delete WinDivert again..."
 
             net stop "WinDivert" >nul 2>&1
             sc delete "WinDivert" >nul 2>&1
+
             sc query "WinDivert" >nul 2>&1
-            if !errorlevel! neq 0 (
+            if !errorlevel!==0 (
                 call :PrintGreen "WinDivert successfully deleted after removing conflicting services"
             ) else (
                 call :PrintRed "[X] WinDivert still cannot be deleted. Check manually if any other bypass is using WinDivert."
             )
+        ) else (
+            call :PrintRed "[X] No known conflicting services removed. Check manually if any other bypass is using WinDivert."
         )
-    ) else (
-        call :PrintGreen "WinDivert successfully removed"
     )
 
     echo:
@@ -649,6 +650,8 @@ set "found_conflicts="
 for %%s in (!conflicting_services!) do (
     sc query "%%s" >nul 2>&1
     if !errorlevel!==0 (
+        rem not installed
+    ) else (
         if "!found_conflicts!"=="" (
             set "found_conflicts=%%s"
         ) else (
@@ -883,7 +886,6 @@ if "%IPsetStatus%"=="loaded" (
         pause
         goto menu
     )
-
 )
 
 pause
@@ -920,16 +922,15 @@ if not exist "%tempFile%" (
     goto menu
 )
 
-:: Check that we downloaded an IP list, not an HTML error page (IPv4 quick check)
-findstr /R "^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*" "%tempFile%" >nul 2>&1
+:: Check that we downloaded a CIDR list, not an HTML error page (rough check)
+findstr /R "^[0-9A-Fa-f\.:][0-9A-Fa-f\.:]*/[0-9]" "%tempFile%" >nul 2>&1
 if !errorlevel! neq 0 (
-    call :PrintRed "Error: downloaded file contains no IPv4 addresses. Server may have returned an error page."
+    call :PrintRed "Error: downloaded file contains no CIDR entries. Server may have returned an error page."
     del /f /q "%tempFile%"
     pause
     goto menu
 )
 
-:: All good - replace the main file
 move /y "%tempFile%" "%listFile%" >nul 2>&1
 call :PrintGreen "IPSet list updated successfully."
 
@@ -945,8 +946,15 @@ cls
 set "hostsFile=%SystemRoot%\System32\drivers\etc\hosts"
 set "hostsUrl=https://raw.githubusercontent.com/MuXolotl/MuZap/main/.service/hosts"
 set "tempFile=%TEMP%\muzap_hosts.txt"
+set "helperPs1=%~dp0utils\hosts_manage.ps1"
 
-echo Checking hosts file...
+if not exist "%helperPs1%" (
+    call :PrintRed "hosts_manage.ps1 not found in utils. Cannot update hosts."
+    pause
+    goto menu
+)
+
+echo Downloading hosts entries...
 
 where curl.exe >nul 2>&1
 if !errorlevel!==0 (
@@ -965,40 +973,56 @@ if not exist "%tempFile%" (
     goto menu
 )
 
-:: Check that we downloaded a valid hosts file, not an HTML error page (IPv4 quick check)
+:: Quick sanity check (avoid appending HTML)
 findstr /R "^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*" "%tempFile%" >nul 2>&1
 if !errorlevel! neq 0 (
-    call :PrintRed "Error: downloaded file seems invalid. Server may have returned an error page."
+    call :PrintRed "Error: downloaded hosts content seems invalid. Server may have returned an error page."
     del /f /q "%tempFile%"
     pause
     goto menu
 )
 
-:: Merge via PowerShell
-powershell -NoProfile -Command ^
-    "$tempFile = '%tempFile%';" ^
-    "$hostsFile = '%hostsFile%';" ^
-    "$existing = [System.IO.File]::ReadAllLines($hostsFile);" ^
-    "$new = [System.IO.File]::ReadAllLines($tempFile);" ^
-    "$toAdd = @();" ^
-    "$added = 0;" ^
-    "$skipped = 0;" ^
-    "foreach ($line in $new) {" ^
-    "    $trimmed = $line.Trim();" ^
-    "    if ($trimmed -eq '' -or $trimmed.StartsWith('#')) { continue };" ^
-    "    if ($existing -contains $trimmed) { $skipped++; continue };" ^
-    "    $toAdd += $trimmed;" ^
-    "    $added++;" ^
-    "};" ^
-    "if ($toAdd.Count -gt 0) {" ^
-    "    [System.IO.File]::AppendAllLines($hostsFile, [string[]]$toAdd);" ^
-    "};" ^
-    "Write-Host \"Added: $added lines, Skipped: $skipped lines (already present).\""
+echo Updating MuZap section in system hosts (BackupMode=%CFG_HostsBackupMode%)...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%helperPs1%" -Action Update -HostsFile "%hostsFile%" -SourceFile "%tempFile%" -MarkerName "MuZap" -BackupMode "%CFG_HostsBackupMode%"
+if !errorlevel! neq 0 (
+    call :PrintRed "Hosts update failed (PowerShell helper returned error)."
+    if exist "%tempFile%" del /f /q "%tempFile%"
+    pause
+    goto menu
+)
 
 if exist "%tempFile%" del /f /q "%tempFile%"
 
 echo.
-call :PrintGreen "Hosts file update complete."
+call :PrintGreen "Hosts file update complete (MuZap section)."
+
+pause
+goto menu
+
+
+:hosts_remove
+chcp 437 > nul
+cls
+
+set "hostsFile=%SystemRoot%\System32\drivers\etc\hosts"
+set "helperPs1=%~dp0utils\hosts_manage.ps1"
+
+if not exist "%helperPs1%" (
+    call :PrintRed "hosts_manage.ps1 not found in utils. Cannot remove hosts section."
+    pause
+    goto menu
+)
+
+echo Removing MuZap section from system hosts (BackupMode=%CFG_HostsBackupMode%)...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%helperPs1%" -Action Remove -HostsFile "%hostsFile%" -MarkerName "MuZap" -BackupMode "%CFG_HostsBackupMode%"
+if !errorlevel! neq 0 (
+    call :PrintRed "Hosts remove failed (PowerShell helper returned error)."
+    pause
+    goto menu
+)
+
+echo.
+call :PrintGreen "MuZap hosts section removed (if it existed)."
 
 pause
 goto menu
@@ -1060,7 +1084,6 @@ exit /b 0
 
 :check_extracted
 set "extracted=1"
-
 if not exist "%~dp0bin\" set "extracted=0"
 
 if "%extracted%"=="0" (
@@ -1106,58 +1129,83 @@ if /i "%BOOT_GameFilterMode%"=="all" (
     echo ;   CheckUpdates: 0 or 1
     echo ;   GameFilterMode: off ^| all ^| tcp ^| udp
     echo.
+    echo ; Hosts backup:
+    echo ;   BackupMode: off ^| once ^| single ^| timestamp
+    echo.
     echo [Features]
     echo CheckUpdates=%BOOT_CheckUpdates%
     echo GameFilterMode=%BOOT_GameFilterMode%
+    echo.
+    echo [Hosts]
+    echo BackupMode=once
 )>"%CONFIG_FILE%"
 
 exit /b
 
 
 :config_load
-set "CFG_CheckUpdates="
-set "CFG_GameFilterMode="
+setlocal EnableDelayedExpansion
+
+set "CFG_CheckUpdates=1"
+set "CFG_GameFilterMode=off"
+set "CFG_HostsBackupMode=once"
 
 if not exist "%CONFIG_FILE%" (
-    set "CFG_CheckUpdates=1"
-    set "CFG_GameFilterMode=off"
+    endlocal & (
+        set "CFG_CheckUpdates=1"
+        set "CFG_GameFilterMode=off"
+        set "CFG_HostsBackupMode=once"
+    )
     exit /b
 )
 
-for /f "usebackq tokens=1* delims==" %%A in (`
-    powershell -NoProfile -Command ^
-      "& { param([string]$path) " ^
-      "  $section = ''; " ^
-      "  if (-not (Test-Path -LiteralPath $path)) { return } " ^
-      "  foreach ($line in Get-Content -LiteralPath $path -ErrorAction SilentlyContinue) { " ^
-      "    $t = $line.Trim(); " ^
-      "    if ($t -eq '' -or $t.StartsWith(';') -or $t.StartsWith('#')) { continue } " ^
-      "    if ($t -match '^\[(.+)\]$') { $section = $matches[1]; continue } " ^
-      "    if ($t -match '^(?<k>[^=]+)=(?<v>.*)$') { " ^
-      "      $k = $matches['k'].Trim(); $v = $matches['v'].Trim(); " ^
-      "      if ($section -ieq 'Features' -and $k -ieq 'CheckUpdates') { 'CheckUpdates=' + $v } " ^
-      "      if ($section -ieq 'Features' -and $k -ieq 'GameFilterMode') { 'GameFilterMode=' + $v } " ^
-      "    } " ^
-      "  } " ^
-      "}" ^
-      "%CONFIG_FILE%"
-`) do (
-    if /i "%%A"=="CheckUpdates" set "CFG_CheckUpdates=%%B"
-    if /i "%%A"=="GameFilterMode" set "CFG_GameFilterMode=%%B"
+set "section="
+for /f "usebackq delims=" %%L in ("%CONFIG_FILE%") do (
+    set "line=%%L"
+    for /f "tokens=* delims= " %%A in ("!line!") do set "line=%%A"
+
+    if "!line!"=="" (
+        rem skip empty
+    ) else if "!line:~0,1!"==";" (
+        rem skip comment
+    ) else if "!line:~0,1!"=="#" (
+        rem skip comment
+    ) else if "!line:~0,1!"=="[" (
+        set "tmp=!line!"
+        if "!tmp:~-1!"=="]" set "section=!tmp:~1,-1!"
+    ) else (
+        for /f "tokens=1* delims==" %%A in ("!line!") do (
+            set "k=%%A"
+            set "v=%%B"
+            for /f "tokens=* delims= " %%p in ("!k!") do set "k=%%p"
+            for /f "tokens=* delims= " %%q in ("!v!") do set "v=%%q"
+
+            if /i "!section!"=="Features" (
+                if /i "!k!"=="CheckUpdates" set "CFG_CheckUpdates=!v!"
+                if /i "!k!"=="GameFilterMode" set "CFG_GameFilterMode=!v!"
+            )
+            if /i "!section!"=="Hosts" (
+                if /i "!k!"=="BackupMode" set "CFG_HostsBackupMode=!v!"
+            )
+        )
+    )
 )
 
-if not defined CFG_CheckUpdates set "CFG_CheckUpdates=1"
-if /i "%CFG_CheckUpdates%" NEQ "0" if /i "%CFG_CheckUpdates%" NEQ "1" set "CFG_CheckUpdates=1"
+if /i "!CFG_CheckUpdates!" NEQ "0" if /i "!CFG_CheckUpdates!" NEQ "1" set "CFG_CheckUpdates=1"
+if /i "!CFG_GameFilterMode!" NEQ "off" if /i "!CFG_GameFilterMode!" NEQ "all" if /i "!CFG_GameFilterMode!" NEQ "tcp" if /i "!CFG_GameFilterMode!" NEQ "udp" set "CFG_GameFilterMode=off"
+if /i "!CFG_HostsBackupMode!" NEQ "off" if /i "!CFG_HostsBackupMode!" NEQ "once" if /i "!CFG_HostsBackupMode!" NEQ "single" if /i "!CFG_HostsBackupMode!" NEQ "timestamp" set "CFG_HostsBackupMode=once"
 
-if not defined CFG_GameFilterMode set "CFG_GameFilterMode=off"
-if /i "%CFG_GameFilterMode%" NEQ "off" if /i "%CFG_GameFilterMode%" NEQ "all" if /i "%CFG_GameFilterMode%" NEQ "tcp" if /i "%CFG_GameFilterMode%" NEQ "udp" set "CFG_GameFilterMode=off"
-
+endlocal & (
+    set "CFG_CheckUpdates=%CFG_CheckUpdates%"
+    set "CFG_GameFilterMode=%CFG_GameFilterMode%"
+    set "CFG_HostsBackupMode=%CFG_HostsBackupMode%"
+)
 exit /b
 
 
 :config_set
-:: Usage: call :config_set Section Key Value
-powershell -NoProfile -Command ^
+:: NOTE: This rewrites muzap.ini using UTF-8 (no BOM)
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "& { param([string]$path,[string]$section,[string]$key,[string]$value) " ^
   "  if (-not $section) { throw 'section is empty' } " ^
   "  if (-not $key) { throw 'key is empty' } " ^
@@ -1187,7 +1235,8 @@ powershell -NoProfile -Command ^
   "    $out.Add('[' + $section + ']'); " ^
   "    $out.Add($key + '=' + $value); " ^
   "  } " ^
-  "  [System.IO.File]::WriteAllLines($path, $out.ToArray(), [System.Text.UTF8Encoding]::new($false)); " ^
+  "  $enc = New-Object System.Text.UTF8Encoding($false); " ^
+  "  [System.IO.File]::WriteAllLines($path, $out.ToArray(), $enc); " ^
   "}" ^
   "%CONFIG_FILE%" "%~1" "%~2" "%~3" >nul 2>&1
 
