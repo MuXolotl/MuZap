@@ -76,19 +76,19 @@ echo   MUZAP SERVICE MANAGER v!LOCAL_VERSION!
 echo   ----------------------------------------
 echo.
 echo   :: SERVICE
-echo      1. Install Service     [!CurrentStrategy!]
-echo      2. Restart Service
-echo      3. Remove Services
-echo      4. Check Status
+echo      1.  Install Service     [!CurrentStrategy!]
+echo      2.  Restart Service
+echo      3.  Remove Services
+echo      4.  Check Status
 echo.
 echo   :: SETTINGS
-echo      5. Game Filter         [!GameFilterStatus!]
-echo      6. IPSet Filter        [!IPsetStatus!]
-echo      7. Auto-Update Check   [!CheckUpdatesStatus!]
+echo      5.  Game Filter         [!GameFilterStatus!]
+echo      6.  IPSet Filter        [!IPsetStatus!]
+echo      7.  Auto-Update Check   [!CheckUpdatesStatus!]
 echo.
 echo   :: UPDATES
-echo      8. Update IPSet List
-echo      9. Update Hosts File
+echo      8.  Update IPSet List
+echo      9.  Update Hosts File
 echo      10. Remove Hosts Entries
 echo      11. Check for Updates
 echo.
