@@ -1,9 +1,9 @@
- $hasErrors = $false
+$hasErrors = $false
 
- $rootDir = Split-Path $PSScriptRoot
- $listsDir = Join-Path $rootDir "lists"
- $utilsDir = Join-Path $rootDir "utils"
- $resultsDir = Join-Path $utilsDir "test results"
+$rootDir = Split-Path $PSScriptRoot
+$listsDir = Join-Path $rootDir "lists"
+$utilsDir = Join-Path $rootDir "utils"
+$resultsDir = Join-Path $utilsDir "test results"
 if (-not (Test-Path $resultsDir)) { New-Item -ItemType Directory -Path $resultsDir | Out-Null }
 
 # Define functions early
@@ -75,10 +75,10 @@ function Convert-Target {
 }
 
 # DPI checker defaults
- $dpiTimeoutSeconds = 5
- $dpiRangeBytes = 65536
- $dpiMaxParallel = 8
- $dpiCustomHost = $env:MONITOR_HOST
+$dpiTimeoutSeconds = 5
+$dpiRangeBytes = 65536
+$dpiMaxParallel = 8
+$dpiCustomHost = $env:MONITOR_HOST
 if ($env:MONITOR_TIMEOUT) { [int]$dpiTimeoutSeconds = $env:MONITOR_TIMEOUT }
 if ($env:MONITOR_RANGE) { [int]$dpiRangeBytes = $env:MONITOR_RANGE }
 if ($env:MONITOR_MAX_PARALLEL) { [int]$dpiMaxParallel = $env:MONITOR_MAX_PARALLEL }
@@ -109,7 +109,7 @@ function Build-DpiTargets {
     $targets = @()
 
     if ($CustomHost) {
-        $targets += @{ Id = "CUSTOM"; Provider = "Custom"; Country = "💡"; Host = $CustomHost }
+        $targets += @{ Id = "CUSTOM"; Provider = "Custom"; Country = "[!]"; Host = $CustomHost }
     } else {
         foreach ($entry in $suite) {
             $targets += @{ Id = $entry.Id; Country = $entry.Country; Provider = $entry.Provider; Host = $entry.Host }
@@ -312,10 +312,10 @@ function Test-MuZapServiceConflict {
 # Parse strategies.ini
 function Get-StrategiesFromIni {
     param([string]$IniPath)
-    
+
     $strategies = @()
     $currentSection = ""
-    
+
     Get-Content $IniPath | ForEach-Object {
         $line = $_.Trim()
         if ($line -match '^\[(.+)\]$') {
@@ -329,27 +329,35 @@ function Get-StrategiesFromIni {
             ($strategies | Where-Object { $_.Name -eq $currentSection }).Params = $params
         }
     }
-    
+
     return $strategies
 }
 
 function Get-GameFilterPorts {
-    $gameFlagFile = Join-Path $rootDir "utils\game_filter.enabled"
+    $iniFile = Join-Path $rootDir "muzap.ini"
     $tcp = "12"
     $udp = "12"
-    
-    if (Test-Path $gameFlagFile) {
-        $mode = (Get-Content $gameFlagFile -First 1).Trim().ToLower()
-        if ($mode -eq "all") { $tcp = "1024-65535"; $udp = "1024-65535" }
-        elseif ($mode -eq "tcp") { $tcp = "1024-65535" }
-        elseif ($mode -eq "udp") { $udp = "1024-65535" }
+
+    if (Test-Path $iniFile) {
+        $inFeatures = $false
+        Get-Content $iniFile | ForEach-Object {
+            $line = $_.Trim()
+            if ($line -match '^\[(.+)\]$') {
+                $inFeatures = ($matches[1] -ieq "Features")
+            } elseif ($inFeatures -and $line -match '^GameFilterMode\s*=\s*(.+)$') {
+                $mode = $matches[1].Trim().ToLower()
+                if     ($mode -eq "all") { $tcp = "1024-65535"; $udp = "1024-65535" }
+                elseif ($mode -eq "tcp") { $tcp = "1024-65535" }
+                elseif ($mode -eq "udp") { $udp = "1024-65535" }
+            }
+        }
     }
-    
+
     return @{ TCP = $tcp; UDP = $udp }
 }
 
 # Check Admin
- $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "[ERROR] Run as Administrator to execute tests" -ForegroundColor Red
     $hasErrors = $true
@@ -367,7 +375,7 @@ if (-not (Get-Command "curl.exe" -ErrorAction SilentlyContinue)) {
 }
 
 # Check for leftover ipset flag
- $ipsetFlagFile = Join-Path $rootDir "ipset_switched.flag"
+$ipsetFlagFile = Join-Path $rootDir "ipset_switched.flag"
 if (Test-Path $ipsetFlagFile) {
     Write-Host "[INFO] Detected leftover ipset switch flag. Restoring ipset..." -ForegroundColor Yellow
     Set-IpsetMode -mode "restore"
@@ -375,7 +383,7 @@ if (Test-Path $ipsetFlagFile) {
 }
 
 # Get original ipset status early
- $originalIpsetStatus = Get-IpsetStatus
+$originalIpsetStatus = Get-IpsetStatus
 
 # Warn about ipset switching
 if ($originalIpsetStatus -ne "any") {
@@ -401,10 +409,10 @@ if ($hasErrors) {
     exit 1
 }
 
- $dpiTargets = Build-DpiTargets -CustomHost $dpiCustomHost
+$dpiTargets = Build-DpiTargets -CustomHost $dpiCustomHost
 
 # Load INI strategies
- $iniFile = Join-Path $rootDir "strategies.ini"
+$iniFile = Join-Path $rootDir "strategies.ini"
 if (-not (Test-Path $iniFile)) {
     Write-Host "[ERROR] strategies.ini not found in root directory!" -ForegroundColor Red
     Write-Host "Press any key to exit..." -ForegroundColor Yellow
@@ -412,13 +420,13 @@ if (-not (Test-Path $iniFile)) {
     exit 1
 }
 
- $allStrategies = Get-StrategiesFromIni -IniPath $iniFile
- $binPath = Join-Path $rootDir "bin\"
- $winwsExe = Join-Path $binPath "winws.exe"
- $listsPath = Join-Path $rootDir "lists\"
- $gamePorts = Get-GameFilterPorts
+$allStrategies = Get-StrategiesFromIni -IniPath $iniFile
+$binPath = Join-Path $rootDir "bin\"
+$winwsExe = Join-Path $binPath "winws.exe"
+$listsPath = Join-Path $rootDir "lists\"
+$gamePorts = Get-GameFilterPorts
 
- $globalResults = @()
+$globalResults = @()
 
 # Select top-level test type
 function Read-TestType {
@@ -456,16 +464,16 @@ function Read-ConfigSelection {
     param([array]$allConfigs)
 
     while ($true) {
-        Write-Host "" 
+        Write-Host ""
         Write-Host "Available configs:" -ForegroundColor Cyan
         for ($i = 0; $i -lt $allConfigs.Count; $i++) {
             $idx = $i + 1
             Write-Host "  [$idx] $($allConfigs[$i].Name) - $($allConfigs[$i].Description)" -ForegroundColor Gray
         }
 
-        $selectionInput = Read-Host "Enter numbers (e.g. 1,3,5) , ranges (e.g. 2-7), or mixed (e.g. 1,5-10,12). '0' for all"
+        $selectionInput = Read-Host "Enter numbers (e.g. 1,3,5), ranges (e.g. 2-7), or mixed (e.g. 1,5-10,12). '0' for all"
         $trimmed = $selectionInput.Trim()
-        
+
         if ($trimmed -eq '0') {
             return $allConfigs
         }
@@ -476,27 +484,28 @@ function Read-ConfigSelection {
             Write-Host "Invalid input format. Use numbers, ranges (1-5), or combinations (1,3-7,10). Try again." -ForegroundColor Yellow
             continue
         }
+
         $selectedIndices = @()
-        $local:hasErrors = $false
-        
+        $local:selectionHasWarnings = $false
+
         foreach ($part in $parts) {
             if ($part -match '^(\d+)-(\d+)$') {
                 $start = [int]$matches[1]
                 $end = [int]$matches[2]
-                
+
                 if ($start -gt $end) {
                     Write-Host "  [WARN] Invalid range '$part' (start > end). Skipping." -ForegroundColor Yellow
-                    $local:hasErrors = $true
+                    $local:selectionHasWarnings = $true
                     continue
                 }
-                
+
                 if ($start -lt 1 -or $end -gt $allConfigs.Count) {
                     Write-Host "  [WARN] Range '$part' out of bounds (valid: 1-$($allConfigs.Count)). Skipping invalid parts." -ForegroundColor Yellow
-                    $local:hasErrors = $true
+                    $local:selectionHasWarnings = $true
                     $start = [Math]::Max($start, 1)
                     $end = [Math]::Min($end, $allConfigs.Count)
                 }
-                
+
                 for ($i = $start; $i -le $end; $i++) {
                     $selectedIndices += $i
                 }
@@ -506,10 +515,11 @@ function Read-ConfigSelection {
                     $selectedIndices += $num
                 } else {
                     Write-Host "  [WARN] Number '$num' out of bounds (valid: 1-$($allConfigs.Count)). Skipping." -ForegroundColor Yellow
-                    $hasErrors = $true
+                    $local:selectionHasWarnings = $true
                 }
             }
         }
+
         $valid = $selectedIndices | Sort-Object -Unique | Where-Object { $_ -ge 1 -and $_ -le $allConfigs.Count }
         if ($valid.Count -eq 0) {
             Write-Host ""
@@ -518,10 +528,10 @@ function Read-ConfigSelection {
         }
 
         Write-Host "Selected configs: $($valid -join ', ')" -ForegroundColor Green
-        if ($local:hasErrors) {
+        if ($local:selectionHasWarnings) {
             Write-Host "Some entries were skipped due to errors (see warnings above)." -ForegroundColor Yellow
         }
-        
+
         return $valid | ForEach-Object { $allConfigs[$_ - 1] }
     }
 }
@@ -530,7 +540,7 @@ while ($true) {
     $globalResults = @()
     $testType = Read-TestType
     $mode = Read-ModeSelection
-    
+
     $strategiesToTest = @($allStrategies)
     if ($mode -eq 'select') {
         $strategiesToTest = @(Read-ConfigSelection -allConfigs $allStrategies)
@@ -596,33 +606,33 @@ while ($true) {
         Get-Process -Name "winws" -ErrorAction SilentlyContinue | Stop-Process -Force
     }
 
-	function Write-Progress-Title {
-		param(
-			[int]$Current,
-			[int]$Total,
-			[string]$ConfigName,
-			[nullable[double]]$EtaSeconds
-		)
+    function Write-Progress-Title {
+        param(
+            [int]$Current,
+            [int]$Total,
+            [string]$ConfigName,
+            [nullable[double]]$EtaSeconds
+        )
 
-		$percent = [math]::Round(($Current - 1) / [math]::Max($Total, 1) * 100)
-		$filled = [math]::Round($percent / 5)
-		$empty = 20 - $filled
-		$bar = "=" * $filled + ">" + " " * $empty
+        $percent = [math]::Round(($Current - 1) / [math]::Max($Total, 1) * 100)
+        $filled = [math]::Round($percent / 5)
+        $empty = 20 - $filled
+        $bar = "=" * $filled + ">" + " " * $empty
 
-		$etaStr = ""
-		if ($EtaSeconds -ne $null -and $EtaSeconds -gt 0) {
-			$etaMin = [math]::Floor($EtaSeconds / 60)
-			$etaSec = [math]::Round($EtaSeconds % 60)
-			if ($etaMin -gt 0) {
-				$etaStr = " | ETA: ${etaMin}m ${etaSec}s"
-			} else {
-				$etaStr = " | ETA: ${etaSec}s"
-			}
-		}
+        $etaStr = ""
+        if ($EtaSeconds -ne $null -and $EtaSeconds -gt 0) {
+            $etaMin = [math]::Floor($EtaSeconds / 60)
+            $etaSec = [math]::Round($EtaSeconds % 60)
+            if ($etaMin -gt 0) {
+                $etaStr = " | ETA: ${etaMin}m ${etaSec}s"
+            } else {
+                $etaStr = " | ETA: ${etaSec}s"
+            }
+        }
 
-		$title = "MuZap Tests [$bar] $Current/$Total$etaStr | $ConfigName"
-		$host.UI.RawUI.WindowTitle = $title
-	}
+        $title = "MuZap Tests [$bar] $Current/$Total$etaStr | $ConfigName"
+        $host.UI.RawUI.WindowTitle = $title
+    }
 
     # Capture/restore running winws instances
     function Get-WinwsSnapshot {
@@ -686,19 +696,19 @@ while ($true) {
         $completedTimes = @()
         $currentEta = $null
         foreach ($strategy in $strategiesToTest) {
-			$configNum++
-			$configStartTime = Get-Date
+            $configNum++
+            $configStartTime = Get-Date
 
-			Write-Progress-Title -Current $configNum -Total $strategiesToTest.Count -ConfigName $strategy.Name -EtaSeconds $currentEta
+            Write-Progress-Title -Current $configNum -Total $strategiesToTest.Count -ConfigName $strategy.Name -EtaSeconds $currentEta
 
-			Write-Host ""
-			Write-Host "------------------------------------------------------------" -ForegroundColor DarkCyan
-			Write-Host "  [$configNum/$($strategiesToTest.Count)] $($strategy.Name) - $($strategy.Description)" -ForegroundColor Yellow
-			Write-Host "------------------------------------------------------------" -ForegroundColor DarkCyan
-            
+            Write-Host ""
+            Write-Host "------------------------------------------------------------" -ForegroundColor DarkCyan
+            Write-Host "  [$configNum/$($strategiesToTest.Count)] $($strategy.Name) - $($strategy.Description)" -ForegroundColor Yellow
+            Write-Host "------------------------------------------------------------" -ForegroundColor DarkCyan
+
             # Cleanup
             Stop-Zapret
-            
+
             # Prepare args
             $rawParams = $strategy.Params
             $finalParams = $rawParams -replace '%BIN%', $binPath `
@@ -709,10 +719,10 @@ while ($true) {
             # Start config
             Write-Host "  > Starting config..." -ForegroundColor Cyan
             $proc = Start-Process -FilePath $winwsExe -ArgumentList $finalParams -WorkingDirectory $binPath -PassThru -WindowStyle Minimized
-            
+
             # Wait init
             Start-Sleep -Seconds 5
-            
+
             if ($testType -eq 'standard') {
                 $curlTimeoutSeconds = 5
 
@@ -745,13 +755,13 @@ while ($true) {
                                     }
                                 }
                                 $httpCode = ($output | Out-String).Trim()
-                                
-                                $dnsHijack = ($stderr -match "Could not resolve host|certificate|SSL certificate problem|self[- ]?signed|certificate verify failed|unable to get local issuer certificate")                        
+
+                                $dnsHijack = ($stderr -match "Could not resolve host|certificate|SSL certificate problem|self[- ]?signed|certificate verify failed|unable to get local issuer certificate")
                                 if ($dnsHijack) {
                                     $httpPieces += "$($test.Label):SSL  "
                                     continue
                                 }
-                                
+
                                 $unsupported = (($LASTEXITCODE -eq 35) -or ($stderr -match "does not support|not supported|protocol\s+'?.+'?\s+not\s+supported|unsupported protocol|TLS.*not supported|Unrecognized option|Unknown option|unsupported option|unsupported feature|schannel"))
                                 if ($unsupported) {
                                     $httpPieces += "$($test.Label):UNSUP"
@@ -842,8 +852,8 @@ while ($true) {
                         foreach ($tok in $res.HttpTokens) {
                             $tokColor = "Green"
                             if ($tok -match "UNSUP") { $tokColor = "Yellow" }
-                            elseif ($tok -match "SSL") { $tokColor = "Red" }
-                            elseif ($tok -match "ERR") { $tokColor = "Red" }
+                            elseif ($tok -match "SSL")  { $tokColor = "Red" }
+                            elseif ($tok -match "ERR")  { $tokColor = "Red" }
                             Write-Host " $tok" -NoNewline -ForegroundColor $tokColor
                         }
                         Write-Host " | Ping: " -NoNewline -ForegroundColor DarkGray
@@ -871,7 +881,7 @@ while ($true) {
                 $dpiResults = Invoke-DpiSuite -Targets $dpiTargets -TimeoutSeconds $dpiTimeoutSeconds -RangeBytes $dpiRangeBytes -MaxParallel $dpiMaxParallel
                 $globalResults += @{ Config = $strategy.Name; Type = 'dpi'; Results = $dpiResults }
             }
-            
+
             # Stop
             Stop-Zapret
             if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
@@ -909,8 +919,8 @@ while ($true) {
                     if (-not $analytics.ContainsKey($config)) { $analytics[$config] = @{ OK = 0; ERROR = 0; UNSUP = 0; PingOK = 0; PingFail = 0 } }
                     if ($targetRes.IsUrl) {
                         foreach ($tok in $targetRes.HttpTokens) {
-                            if ($tok -match "OK") { $analytics[$config].OK++ }
-                            elseif ($tok -match "SSL") { $analytics[$config].ERROR++ }
+                            if ($tok -match "OK")    { $analytics[$config].OK++ }
+                            elseif ($tok -match "SSL")   { $analytics[$config].ERROR++ }
                             elseif ($tok -match "ERROR") { $analytics[$config].ERROR++ }
                             elseif ($tok -match "UNSUP") { $analytics[$config].UNSUP++ }
                         }
@@ -922,9 +932,9 @@ while ($true) {
                     $config = $res.Config
                     if (-not $analytics.ContainsKey($config)) { $analytics[$config] = @{ OK = 0; FAIL = 0; UNSUPPORTED = 0; LIKELY_BLOCKED = 0 } }
                     foreach ($line in $targetRes.Lines) {
-                        if ($line.Status -eq "OK") { $analytics[$config].OK++ }
-                        elseif ($line.Status -eq "FAIL") { $analytics[$config].FAIL++ }
-                        elseif ($line.Status -eq "UNSUPPORTED") { $analytics[$config].UNSUPPORTED++ }
+                        if ($line.Status -eq "OK")             { $analytics[$config].OK++ }
+                        elseif ($line.Status -eq "FAIL")           { $analytics[$config].FAIL++ }
+                        elseif ($line.Status -eq "UNSUPPORTED")    { $analytics[$config].UNSUPPORTED++ }
                         elseif ($line.Status -eq "LIKELY_BLOCKED") { $analytics[$config].LIKELY_BLOCKED++ }
                     }
                 }
@@ -968,7 +978,7 @@ while ($true) {
         Write-Host "Best config: $bestConfig" -ForegroundColor Green
         Write-Host ""
 
-        # Save to file
+        # Save results to file
         $dateStr = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
         $resultFile = Join-Path $resultsDir "test_results_$dateStr.txt"
         "" | Out-File $resultFile -Encoding UTF8
@@ -1001,7 +1011,7 @@ while ($true) {
             Add-Content $resultFile ""
         }
 
-        # Add analytics
+        # Add analytics to file
         Add-Content $resultFile "=== ANALYTICS ==="
         foreach ($config in $analytics.Keys) {
             $a = $analytics[$config]

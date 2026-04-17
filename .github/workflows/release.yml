@@ -26,7 +26,6 @@ jobs:
 
       - name: Inject version into MuZap.bat
         run: |
-          # This command finds the LOCAL_VERSION line and replaces 0.0.0 (or whatever is there) with your release version
           sed -i 's/set "LOCAL_VERSION=.*"/set "LOCAL_VERSION=${{ github.event.inputs.version }}"/' MuZap.bat
 
       - name: Commit version bump
@@ -39,7 +38,6 @@ jobs:
 
       - name: Create Zip Archive
         run: |
-          # Archive the entire repo but exclude dev/repo-specific files and web-only service data
           zip -r MuZap_${{ github.event.inputs.version }}.zip . \
             -x ".git/*" \
             -x ".github/*" \
@@ -48,7 +46,7 @@ jobs:
             -x ".service/*"
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.event.inputs.version }}
           name: Release v${{ github.event.inputs.version }}
