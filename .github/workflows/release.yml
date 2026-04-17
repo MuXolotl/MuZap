@@ -45,8 +45,6 @@ jobs:
             -x ".github/*" \
             -x ".gitattributes" \
             -x ".gitignore" \
-            -x "LICENSE" \
-            -x "README.md" \
             -x ".service/*"
 
       - name: Create Release
