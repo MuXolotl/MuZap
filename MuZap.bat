@@ -72,14 +72,14 @@ call :current_strategy_status
 set "menu_choice=null"
 
 echo.
-echo   MUZAP SERVICE MANAGER v!LOCAL_VERSION!
-echo   ==========================================
+echo           MUZAP SERVICE MANAGER v!LOCAL_VERSION!
+echo ================================================
 echo.
 echo   1.  Service      ^| Strategy: !CurrentStrategy!
-echo   2.  Settings     ^| Game: !GameFilterStatus!  Updates: !CheckUpdatesStatus!
+echo   2.  Settings     ^| Game: !GameFilterStatus! / Updates: !CheckUpdatesStatus!
 echo   3.  Updates
 echo   4.  Tools
-echo   ------------------------------------------
+echo ------------------------------------------------
 echo   0.  Exit
 echo.
 
@@ -103,14 +103,14 @@ call :current_strategy_status
 set "menu_choice=null"
 
 echo.
-echo   SERVICE MANAGEMENT
-echo   ==========================================
+echo                SERVICE MANAGEMENT
+echo ================================================
 echo.
-echo   1.  Install / Change Strategy  [!CurrentStrategy!]
+echo   1.  Install ^| Change Strategy  [!CurrentStrategy!]
 echo   2.  Restart
 echo   3.  Remove
 echo   4.  Status
-echo   ------------------------------------------
+echo ------------------------------------------------
 echo   0.  Back
 echo.
 
@@ -136,13 +136,13 @@ call :check_updates_switch_status
 set "menu_choice=null"
 
 echo.
-echo   SETTINGS
-echo   ==========================================
+echo                     SETTINGS
+echo ================================================
 echo.
 echo   1.  Game Filter     [!GameFilterStatus!]
 echo   2.  IPSet Filter    [!IPsetStatus!]
 echo   3.  Auto-Updates    [!CheckUpdatesStatus!]
-echo   ------------------------------------------
+echo ------------------------------------------------
 echo   0.  Back
 echo.
 
@@ -162,14 +162,14 @@ cls
 set "menu_choice=null"
 
 echo.
-echo   UPDATES
-echo   ==========================================
+echo                     UPDATES
+echo ================================================
 echo.
 echo   1.  Update IPSet List
 echo   2.  Update Hosts File
 echo   3.  Remove Hosts Entries
 echo   4.  Check for Updates Now
-echo   ------------------------------------------
+echo ------------------------------------------------
 echo   0.  Back
 echo.
 
@@ -190,12 +190,12 @@ cls
 set "menu_choice=null"
 
 echo.
-echo   TOOLS
-echo   ==========================================
+echo                      TOOLS
+echo ================================================
 echo.
 echo   1.  Run Diagnostics
 echo   2.  Run Tests
-echo   ------------------------------------------
+echo ------------------------------------------------
 echo   0.  Back
 echo.
 
