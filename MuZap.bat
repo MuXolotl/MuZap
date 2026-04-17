@@ -1,5 +1,5 @@
 @echo off
-set "LOCAL_VERSION=1.0.2"
+set "LOCAL_VERSION=1.0.3"
 if exist "%~dp0.service\version.txt" set /p LOCAL_VERSION=<"%~dp0.service\version.txt"
 
 set "CONFIG_FILE=%~dp0muzap.ini"
