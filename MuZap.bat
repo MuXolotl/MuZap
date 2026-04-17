@@ -2,6 +2,10 @@
 set "LOCAL_VERSION=1.0.2"
 if exist "%~dp0.service\version.txt" set /p LOCAL_VERSION=<"%~dp0.service\version.txt"
 
+set "CONFIG_FILE=%~dp0muzap.ini"
+call :config_bootstrap
+call :config_load
+
 :: External commands
 if "%~1"=="status_zapret" (
     call :test_service MuZap soft
@@ -12,18 +16,20 @@ if "%~1"=="status_zapret" (
 if "%~1"=="check_updates" (
     if defined NO_UPDATE_CHECK exit /b
 
-    if exist "%~dp0utils\check_updates.enabled" (
-        if not "%~2"=="soft" (
-            start /b MuZap check_updates soft
-        ) else (
-            call :service_check_updates soft
-        )
+    call :config_load
+    if "%CFG_CheckUpdates%"=="0" exit /b
+
+    if not "%~2"=="soft" (
+        start /b MuZap check_updates soft
+    ) else (
+        call :service_check_updates soft
     )
 
     exit /b
 )
 
 if "%~1"=="load_game_filter" (
+    call :config_load
     call :game_switch_status
     exit /b
 )
@@ -38,7 +44,7 @@ if "%1"=="admin" (
     call :check_command find
     call :check_command findstr
     call :check_command netsh
-    
+
     call :load_user_lists
 
     echo Started with admin rights
@@ -56,6 +62,8 @@ if "%1"=="admin" (
 setlocal EnableDelayedExpansion
 :menu
 cls
+
+call :config_load
 call :ipset_switch_status
 call :game_switch_status
 call :check_updates_switch_status
@@ -91,7 +99,7 @@ echo   ----------------------------------------
 echo      0. Exit
 echo.
 
-set /p menu_choice=   Select option (0-12): 
+set /p menu_choice=   Select option (0-12):
 
 if "%menu_choice%"=="1" goto service_install
 if "%menu_choice%"=="2" goto service_restart
@@ -177,7 +185,7 @@ if "%ServiceStatus%"=="RUNNING" (
         echo "%ServiceName%" service is RUNNING.
     )
 ) else if "%ServiceStatus%"=="STOP_PENDING" (
-    call :PrintYellow "!ServiceName! is STOP_PENDING, that may be caused by a conflict with another bypass. Run Diagnostics to try to fix conflicts"
+    call :PrintYellow "%ServiceName% is STOP_PENDING, that may be caused by a conflict with another bypass. Run Diagnostics to try to fix conflicts"
 ) else if not "%~2"=="soft" (
     echo "%ServiceName%" service is NOT running.
 )
@@ -273,7 +281,7 @@ set "CUR_SEC="
 for /f "usebackq tokens=1,* delims==" %%A in ("%INI_FILE%") do (
     set "KEY=%%A"
     for /f "tokens=* delims= " %%a in ("!KEY!") do set "KEY=%%a"
-    
+
     if "!KEY:~0,1!"=="[" (
         set /a count+=1
         set "CUR_SEC=!KEY:~1,-1!"
@@ -310,7 +318,7 @@ set "READING=0"
 for /f "usebackq tokens=1,* delims==" %%A in ("%INI_FILE%") do (
     set "KEY=%%A"
     for /f "tokens=* delims= " %%a in ("!KEY!") do set "KEY=%%a"
-    
+
     if "!KEY:~0,1!"=="[" (
         set "CUR_READ_SEC=!KEY:~1,-1!"
         if /i "!CUR_READ_SEC!"=="!selectedSection!" (
@@ -396,18 +404,18 @@ for /f "delims=" %%A in ('powershell -NoProfile -Command "(Invoke-WebRequest -Ur
 if not defined GITHUB_VERSION (
     echo Warning: failed to fetch the latest version. This warning does not affect the operation of MuZap
     timeout /T 9
-    if "%1"=="soft" exit 
+    if "%1"=="soft" exit /b
     goto menu
 )
 
 :: Version comparison
 if "%LOCAL_VERSION%"=="%GITHUB_VERSION%" (
     echo Latest version installed: %LOCAL_VERSION%
-    
-    if "%1"=="soft" exit 
+
+    if "%1"=="soft" exit /b
     pause
     goto menu
-) 
+)
 
 echo New version available: %GITHUB_VERSION%
 echo Release page: %GITHUB_RELEASE_URL%%GITHUB_VERSION%
@@ -415,8 +423,7 @@ echo Release page: %GITHUB_RELEASE_URL%%GITHUB_VERSION%
 echo Opening the download page...
 start "" "%GITHUB_DOWNLOAD_URL%"
 
-
-if "%1"=="soft" exit 
+if "%1"=="soft" exit /b
 pause
 goto menu
 
@@ -448,7 +455,7 @@ if !proxyEnabled!==1 (
     for /f "tokens=2*" %%A in ('reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyServer 2^>nul ^| findstr /i "ProxyServer"') do (
         set "proxyServer=%%B"
     )
-    
+
     call :PrintYellow "[?] System proxy is enabled: !proxyServer!"
     call :PrintYellow "Make sure it's valid or disable it if you don't use a proxy"
 ) else (
@@ -511,10 +518,10 @@ if !errorlevel!==0 (
 )
 
 if !checkpointFound!==1 (
+    call :PrintGreen "Check Point check passed"
+) else (
     call :PrintRed "[X] Check Point services found. Check Point conflicts with MuZap"
     call :PrintRed "Try to uninstall Check Point"
-) else (
-    call :PrintGreen "Check Point check passed"
 )
 echo:
 
@@ -588,16 +595,16 @@ set "windivert_running=!errorlevel!"
 
 if !winws_running! neq 0 if !windivert_running!==0 (
     call :PrintYellow "[?] winws.exe is not running but WinDivert service is active. Attempting to delete WinDivert..."
-    
+
     net stop "WinDivert" >nul 2>&1
     sc delete "WinDivert" >nul 2>&1
     sc query "WinDivert" >nul 2>&1
     if !errorlevel!==0 (
         call :PrintRed "[X] Failed to delete WinDivert. Checking for conflicting services..."
-        
+
         set "conflicting_services=GoodbyeDPI"
         set "found_conflict=0"
-        
+
         for %%s in (!conflicting_services!) do (
             sc query "%%s" >nul 2>&1
             if !errorlevel!==0 (
@@ -612,7 +619,7 @@ if !winws_running! neq 0 if !windivert_running!==0 (
                 set "found_conflict=1"
             )
         )
-        
+
         if !found_conflict!==0 (
             call :PrintRed "[X] No conflicting services found. Check manually if any other bypass is using WinDivert."
         ) else (
@@ -630,7 +637,7 @@ if !winws_running! neq 0 if !windivert_running!==0 (
     ) else (
         call :PrintGreen "WinDivert successfully removed"
     )
-    
+
     echo:
 )
 
@@ -653,12 +660,12 @@ for %%s in (!conflicting_services!) do (
 
 if !found_any_conflict!==1 (
     call :PrintRed "[X] Conflicting bypass services found: !found_conflicts!"
-    
+
     set "CHOICE="
     set /p "CHOICE=Do you want to remove these conflicting services? (Y/N) (default: N) "
     if "!CHOICE!"=="" set "CHOICE=N"
     if "!CHOICE!"=="y" set "CHOICE=Y"
-    
+
     if /i "!CHOICE!"=="Y" (
         for %%s in (!found_conflicts!) do (
             call :PrintYellow "Stopping and removing service: %%s"
@@ -676,7 +683,7 @@ if !found_any_conflict!==1 (
         net stop "WinDivert14" >nul 2>&1
         sc delete "WinDivert14" >nul 2>&1
     )
-    
+
     echo:
 )
 
@@ -724,45 +731,34 @@ goto menu
 :game_switch_status
 chcp 437 > nul
 
-set "gameFlagFile=%~dp0utils\game_filter.enabled"
+set "GameFilterStatus=disabled"
+set "GameFilter=12"
+set "GameFilterTCP=12"
+set "GameFilterUDP=12"
 
-if not exist "%gameFlagFile%" (
-    set "GameFilterStatus=disabled"
-    set "GameFilter=12"
-    set "GameFilterTCP=12"
-    set "GameFilterUDP=12"
-    exit /b
-)
-
-set "GameFilterMode="
-for /f "usebackq delims=" %%A in ("%gameFlagFile%") do (
-    if not defined GameFilterMode set "GameFilterMode=%%A"
-)
-
-if /i "%GameFilterMode%"=="all" (
+if /i "%CFG_GameFilterMode%"=="all" (
     set "GameFilterStatus=enabled (TCP and UDP)"
     set "GameFilter=1024-65535"
     set "GameFilterTCP=1024-65535"
     set "GameFilterUDP=1024-65535"
-) else if /i "%GameFilterMode%"=="tcp" (
+) else if /i "%CFG_GameFilterMode%"=="tcp" (
     set "GameFilterStatus=enabled (TCP)"
     set "GameFilter=1024-65535"
     set "GameFilterTCP=1024-65535"
     set "GameFilterUDP=12"
-) else (
+) else if /i "%CFG_GameFilterMode%"=="udp" (
     set "GameFilterStatus=enabled (UDP)"
     set "GameFilter=1024-65535"
     set "GameFilterTCP=12"
     set "GameFilterUDP=1024-65535"
 )
+
 exit /b
 
 
 :game_switch
 chcp 437 > nul
 cls
-
-set "gameFlagFile=%~dp0utils\game_filter.enabled"
 
 echo Select game filter mode:
 echo   0. Disable
@@ -772,20 +768,16 @@ echo   3. UDP only
 echo.
 set "GameFilterChoice=0"
 set /p "GameFilterChoice=Select option (0-3, default: 0): "
-if %GameFilterChoice%=="" set "GameFilterChoice=0"
+if "%GameFilterChoice%"=="" set "GameFilterChoice=0"
 
 if "%GameFilterChoice%"=="0" (
-    if exist "%gameFlagFile%" (
-        del /f /q "%gameFlagFile%"
-    ) else (
-        goto menu
-    )
+    call :config_set Features GameFilterMode off
 ) else if "%GameFilterChoice%"=="1" (
-    echo all>"%gameFlagFile%"
+    call :config_set Features GameFilterMode all
 ) else if "%GameFilterChoice%"=="2" (
-    echo tcp>"%gameFlagFile%"
+    call :config_set Features GameFilterMode tcp
 ) else if "%GameFilterChoice%"=="3" (
-    echo udp>"%gameFlagFile%"
+    call :config_set Features GameFilterMode udp
 ) else (
     echo Invalid choice, exiting...
     pause
@@ -801,9 +793,7 @@ goto menu
 :check_updates_switch_status
 chcp 437 > nul
 
-set "checkUpdatesFlag=%~dp0utils\check_updates.enabled"
-
-if exist "%checkUpdatesFlag%" (
+if "%CFG_CheckUpdates%"=="1" (
     set "CheckUpdatesStatus=enabled"
 ) else (
     set "CheckUpdatesStatus=disabled"
@@ -815,12 +805,12 @@ exit /b
 chcp 437 > nul
 cls
 
-if not exist "%checkUpdatesFlag%" (
-    echo Enabling check updates...
-    echo ENABLED > "%checkUpdatesFlag%"
-) else (
+if "%CFG_CheckUpdates%"=="1" (
     echo Disabling check updates...
-    del /f /q "%checkUpdatesFlag%"
+    call :config_set Features CheckUpdates 0
+) else (
+    echo Enabling check updates...
+    call :config_set Features CheckUpdates 1
 )
 
 pause
@@ -832,13 +822,20 @@ goto menu
 chcp 437 > nul
 
 set "listFile=%~dp0lists\ipset-all.txt"
+set "lineCount=0"
+
+if not exist "%listFile%" (
+    set "IPsetStatus=none"
+    exit /b
+)
+
 for /f %%i in ('type "%listFile%" 2^>nul ^| find /c /v ""') do set "lineCount=%%i"
 
-if !lineCount!==0 (
+if !lineCount! EQU 0 (
     set "IPsetStatus=any"
 ) else (
     findstr /R "^203\.0\.113\.113/32$" "%listFile%" >nul
-    if !errorlevel!==0 (
+    if !errorlevel! EQU 0 (
         set "IPsetStatus=none"
     ) else (
         set "IPsetStatus=loaded"
@@ -856,28 +853,28 @@ set "backupFile=%listFile%.backup"
 
 if "%IPsetStatus%"=="loaded" (
     echo Switching to none mode...
-    
+
     if not exist "%backupFile%" (
         ren "%listFile%" "ipset-all.txt.backup"
     ) else (
         del /f /q "%backupFile%"
         ren "%listFile%" "ipset-all.txt.backup"
     )
-    
+
     >"%listFile%" (
         echo 203.0.113.113/32
     )
-    
+
 ) else if "%IPsetStatus%"=="none" (
     echo Switching to any mode...
-    
+
     >"%listFile%" (
         rem Creating empty file
     )
-    
+
 ) else if "%IPsetStatus%"=="any" (
     echo Switching to loaded mode...
-    
+
     if exist "%backupFile%" (
         del /f /q "%listFile%"
         ren "%backupFile%" "ipset-all.txt"
@@ -886,7 +883,7 @@ if "%IPsetStatus%"=="loaded" (
         pause
         goto menu
     )
-    
+
 )
 
 pause
@@ -906,8 +903,6 @@ echo Updating ipset-all...
 
 where curl.exe >nul 2>&1
 if !errorlevel!==0 (
-    curl -L -f -m 15 -o "%tempFile%" "%url%"
-) else (
     powershell -NoProfile -Command ^
         "$url = '%url%';" ^
         "$out = '%tempFile%';" ^
@@ -915,6 +910,8 @@ if !errorlevel!==0 (
         "if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null };" ^
         "$res = Invoke-WebRequest -Uri $url -TimeoutSec 10 -UseBasicParsing;" ^
         "if ($res.StatusCode -eq 200) { $res.Content | Out-File -FilePath $out -Encoding UTF8 } else { exit 1 }"
+) else (
+    curl -L -f -m 15 -o "%tempFile%" "%url%"
 )
 
 if not exist "%tempFile%" (
@@ -923,10 +920,10 @@ if not exist "%tempFile%" (
     goto menu
 )
 
-:: Check that we downloaded an IP list, not an HTML error page
+:: Check that we downloaded an IP list, not an HTML error page (IPv4 quick check)
 findstr /R "^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*" "%tempFile%" >nul 2>&1
 if !errorlevel! neq 0 (
-    call :PrintRed "Error: downloaded file contains no IP addresses. Server may have returned an error page."
+    call :PrintRed "Error: downloaded file contains no IPv4 addresses. Server may have returned an error page."
     del /f /q "%tempFile%"
     pause
     goto menu
@@ -953,13 +950,13 @@ echo Checking hosts file...
 
 where curl.exe >nul 2>&1
 if !errorlevel!==0 (
-    curl -L -f -m 15 -o "%tempFile%" "%hostsUrl%"
-) else (
     powershell -NoProfile -Command ^
         "$url = '%hostsUrl%';" ^
         "$out = '%tempFile%';" ^
         "$res = Invoke-WebRequest -Uri $url -TimeoutSec 10 -UseBasicParsing;" ^
         "if ($res.StatusCode -eq 200) { $res.Content | Out-File -FilePath $out -Encoding UTF8 } else { exit 1 }"
+) else (
+    curl -L -f -m 15 -o "%tempFile%" "%hostsUrl%"
 )
 
 if not exist "%tempFile%" (
@@ -968,7 +965,7 @@ if not exist "%tempFile%" (
     goto menu
 )
 
-:: Check that we downloaded a valid hosts file, not an HTML error page
+:: Check that we downloaded a valid hosts file, not an HTML error page (IPv4 quick check)
 findstr /R "^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*" "%tempFile%" >nul 2>&1
 if !errorlevel! neq 0 (
     call :PrintRed "Error: downloaded file seems invalid. Server may have returned an error page."
@@ -1072,3 +1069,126 @@ if "%extracted%"=="0" (
     exit
 )
 exit /b 0
+
+
+:: CONFIG (INI) =========================
+:config_bootstrap
+:: Create config file if missing.
+:: Also migrates old flag files (utils\check_updates.enabled, utils\game_filter.enabled) into ini defaults.
+if exist "%CONFIG_FILE%" exit /b
+
+set "BOOT_CheckUpdates=0"
+if exist "%~dp0utils\check_updates.enabled" set "BOOT_CheckUpdates=1"
+
+set "BOOT_GameFilterMode=off"
+if exist "%~dp0utils\game_filter.enabled" (
+    for /f "usebackq delims=" %%A in ("%~dp0utils\game_filter.enabled") do (
+        if not defined BOOT_GameFilterMode_READ (
+            set "BOOT_GameFilterMode=%%A"
+            set "BOOT_GameFilterMode_READ=1"
+        )
+    )
+)
+
+if /i "%BOOT_GameFilterMode%"=="all" (
+    rem ok
+) else if /i "%BOOT_GameFilterMode%"=="tcp" (
+    rem ok
+) else if /i "%BOOT_GameFilterMode%"=="udp" (
+    rem ok
+) else (
+    set "BOOT_GameFilterMode=off"
+)
+
+(
+    echo ; MuZap configuration file
+    echo ; Values:
+    echo ;   CheckUpdates: 0 or 1
+    echo ;   GameFilterMode: off ^| all ^| tcp ^| udp
+    echo.
+    echo [Features]
+    echo CheckUpdates=%BOOT_CheckUpdates%
+    echo GameFilterMode=%BOOT_GameFilterMode%
+)>"%CONFIG_FILE%"
+
+exit /b
+
+
+:config_load
+set "CFG_CheckUpdates="
+set "CFG_GameFilterMode="
+
+if not exist "%CONFIG_FILE%" (
+    set "CFG_CheckUpdates=1"
+    set "CFG_GameFilterMode=off"
+    exit /b
+)
+
+for /f "usebackq tokens=1* delims==" %%A in (`
+    powershell -NoProfile -Command ^
+      "& { param([string]$path) " ^
+      "  $section = ''; " ^
+      "  if (-not (Test-Path -LiteralPath $path)) { return } " ^
+      "  foreach ($line in Get-Content -LiteralPath $path -ErrorAction SilentlyContinue) { " ^
+      "    $t = $line.Trim(); " ^
+      "    if ($t -eq '' -or $t.StartsWith(';') -or $t.StartsWith('#')) { continue } " ^
+      "    if ($t -match '^\[(.+)\]$') { $section = $matches[1]; continue } " ^
+      "    if ($t -match '^(?<k>[^=]+)=(?<v>.*)$') { " ^
+      "      $k = $matches['k'].Trim(); $v = $matches['v'].Trim(); " ^
+      "      if ($section -ieq 'Features' -and $k -ieq 'CheckUpdates') { 'CheckUpdates=' + $v } " ^
+      "      if ($section -ieq 'Features' -and $k -ieq 'GameFilterMode') { 'GameFilterMode=' + $v } " ^
+      "    } " ^
+      "  } " ^
+      "}" ^
+      "%CONFIG_FILE%"
+`) do (
+    if /i "%%A"=="CheckUpdates" set "CFG_CheckUpdates=%%B"
+    if /i "%%A"=="GameFilterMode" set "CFG_GameFilterMode=%%B"
+)
+
+if not defined CFG_CheckUpdates set "CFG_CheckUpdates=1"
+if /i "%CFG_CheckUpdates%" NEQ "0" if /i "%CFG_CheckUpdates%" NEQ "1" set "CFG_CheckUpdates=1"
+
+if not defined CFG_GameFilterMode set "CFG_GameFilterMode=off"
+if /i "%CFG_GameFilterMode%" NEQ "off" if /i "%CFG_GameFilterMode%" NEQ "all" if /i "%CFG_GameFilterMode%" NEQ "tcp" if /i "%CFG_GameFilterMode%" NEQ "udp" set "CFG_GameFilterMode=off"
+
+exit /b
+
+
+:config_set
+:: Usage: call :config_set Section Key Value
+powershell -NoProfile -Command ^
+  "& { param([string]$path,[string]$section,[string]$key,[string]$value) " ^
+  "  if (-not $section) { throw 'section is empty' } " ^
+  "  if (-not $key) { throw 'key is empty' } " ^
+  "  if (-not (Test-Path -LiteralPath $path)) { New-Item -ItemType File -Path $path -Force | Out-Null } " ^
+  "  $lines = @(); " ^
+  "  try { $lines = Get-Content -LiteralPath $path -ErrorAction SilentlyContinue } catch { $lines = @() } " ^
+  "  $out = New-Object System.Collections.Generic.List[string]; " ^
+  "  $inSection = $false; $sectionFound = $false; $keySet = $false; " ^
+  "  foreach ($line in $lines) { " ^
+  "    $trim = $line.Trim(); " ^
+  "    if ($trim -match '^\[(.+)\]$') { " ^
+  "      if ($inSection -and -not $keySet) { $out.Add($key + '=' + $value); $keySet = $true } " ^
+  "      $cur = $matches[1]; " ^
+  "      if ($cur -ieq $section) { $inSection = $true; $sectionFound = $true } else { $inSection = $false } " ^
+  "      $out.Add($line); " ^
+  "      continue; " ^
+  "    } " ^
+  "    if ($inSection -and ($trim -match '^(?<k>[^=]+)=(?<v>.*)$')) { " ^
+  "      $k = $matches['k'].Trim(); " ^
+  "      if ($k -ieq $key) { $out.Add($key + '=' + $value); $keySet = $true; continue } " ^
+  "    } " ^
+  "    $out.Add($line); " ^
+  "  } " ^
+  "  if ($sectionFound -and -not $keySet) { $out.Add($key + '=' + $value); $keySet = $true } " ^
+  "  if (-not $sectionFound) { " ^
+  "    if ($out.Count -gt 0 -and $out[$out.Count-1].Trim() -ne '') { $out.Add('') } " ^
+  "    $out.Add('[' + $section + ']'); " ^
+  "    $out.Add($key + '=' + $value); " ^
+  "  } " ^
+  "  [System.IO.File]::WriteAllLines($path, $out.ToArray(), [System.Text.UTF8Encoding]::new($false)); " ^
+  "}" ^
+  "%CONFIG_FILE%" "%~1" "%~2" "%~3" >nul 2>&1
+
+exit /b
