@@ -596,6 +596,34 @@ while ($true) {
         Get-Process -Name "winws" -ErrorAction SilentlyContinue | Stop-Process -Force
     }
 
+	function Write-Progress-Title {
+		param(
+			[int]$Current,
+			[int]$Total,
+			[string]$ConfigName,
+			[nullable[double]]$EtaSeconds
+		)
+
+		$percent = [math]::Round(($Current - 1) / [math]::Max($Total, 1) * 100)
+		$filled = [math]::Round($percent / 5)
+		$empty = 20 - $filled
+		$bar = "=" * $filled + ">" + " " * $empty
+
+		$etaStr = ""
+		if ($EtaSeconds -ne $null -and $EtaSeconds -gt 0) {
+			$etaMin = [math]::Floor($EtaSeconds / 60)
+			$etaSec = [math]::Round($EtaSeconds % 60)
+			if ($etaMin -gt 0) {
+				$etaStr = " | ETA: ${etaMin}m ${etaSec}s"
+			} else {
+				$etaStr = " | ETA: ${etaSec}s"
+			}
+		}
+
+		$title = "MuZap Tests [$bar] $Current/$Total$etaStr | $ConfigName"
+		$host.UI.RawUI.WindowTitle = $title
+	}
+
     # Capture/restore running winws instances
     function Get-WinwsSnapshot {
         try {
@@ -655,12 +683,18 @@ while ($true) {
         Write-Host "[WARNING] Tests may take several minutes to complete. Please wait..." -ForegroundColor Yellow
 
         $configNum = 0
+        $completedTimes = @()
+        $currentEta = $null
         foreach ($strategy in $strategiesToTest) {
-            $configNum++
-            Write-Host ""
-            Write-Host "------------------------------------------------------------" -ForegroundColor DarkCyan
-            Write-Host "  [$configNum/$($strategiesToTest.Count)] $($strategy.Name) - $($strategy.Description)" -ForegroundColor Yellow
-            Write-Host "------------------------------------------------------------" -ForegroundColor DarkCyan
+			$configNum++
+			$configStartTime = Get-Date
+
+			Write-Progress-Title -Current $configNum -Total $strategiesToTest.Count -ConfigName $strategy.Name -EtaSeconds $currentEta
+
+			Write-Host ""
+			Write-Host "------------------------------------------------------------" -ForegroundColor DarkCyan
+			Write-Host "  [$configNum/$($strategiesToTest.Count)] $($strategy.Name) - $($strategy.Description)" -ForegroundColor Yellow
+			Write-Host "------------------------------------------------------------" -ForegroundColor DarkCyan
             
             # Cleanup
             Stop-Zapret
@@ -841,6 +875,26 @@ while ($true) {
             # Stop
             Stop-Zapret
             if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+
+            # Track timing and ETA
+            $configEndTime = Get-Date
+            $configElapsed = ($configEndTime - $configStartTime).TotalSeconds
+            $completedTimes += $configElapsed
+            $avgTime = ($completedTimes | Measure-Object -Average).Average
+            $remaining = $strategiesToTest.Count - $configNum
+            $currentEta = $avgTime * $remaining
+
+            Write-Host ""
+            Write-Host "  Config finished in $([math]::Round($configElapsed, 1))s" -ForegroundColor DarkGray
+            if ($remaining -gt 0) {
+                $etaMin = [math]::Floor($currentEta / 60)
+                $etaSec = [math]::Round($currentEta % 60)
+                if ($etaMin -gt 0) {
+                    Write-Host "  ETA for remaining $remaining config(s): ${etaMin}m ${etaSec}s" -ForegroundColor DarkGray
+                } else {
+                    Write-Host "  ETA for remaining $remaining config(s): ${etaSec}s" -ForegroundColor DarkGray
+                }
+            }
         }
 
         Write-Host ""
