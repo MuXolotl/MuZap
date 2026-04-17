@@ -221,7 +221,7 @@ function Invoke-DpiSuite {
         return [PSCustomObject]@{
             TargetId = $target.Id
             Provider = $target.Provider
-            Country   = $target.Country
+            Country  = $target.Country
             Lines    = $lines
             Warned   = $warned
         }
@@ -279,13 +279,13 @@ function Invoke-DpiSuite {
         } catch {
             Write-Host "[WARN] EndInvoke failed for a runspace; treating as failure." -ForegroundColor Yellow
             $failedLine = [PSCustomObject]@{
-                TestLabel  = 'RUNSPACE'
-                Code       = 'ERR'
-                SizeBytes  = 0
-                SizeKB     = 0
-                Status     = 'FAIL'
-                Color      = 'Red'
-                Warned     = $false
+                TestLabel = 'RUNSPACE'
+                Code      = 'ERR'
+                SizeBytes = 0
+                SizeKB    = 0
+                Status    = 'FAIL'
+                Color     = 'Red'
+                Warned    = $false
             }
             $results += [PSCustomObject]@{ TargetId = 'UNKNOWN'; Provider = 'UNKNOWN'; Lines = @($failedLine); Warned = $false }
         }
@@ -333,6 +333,7 @@ function Get-StrategiesFromIni {
     return $strategies
 }
 
+# Read game filter mode from muzap.ini
 function Get-GameFilterPorts {
     $iniFile = Join-Path $rootDir "muzap.ini"
     $tcp = "12"
@@ -356,6 +357,74 @@ function Get-GameFilterPorts {
     return @{ TCP = $tcp; UDP = $udp }
 }
 
+# Print a summary comparison table for all tested strategies
+function Write-SummaryTable {
+    param([hashtable]$Analytics)
+
+    if ($Analytics.Count -eq 0) { return }
+
+    $firstKey = ($Analytics.Keys | Select-Object -First 1)
+    $isStandard = $Analytics[$firstKey].ContainsKey('PingOK')
+
+    if ($isStandard) {
+        $headers   = @("Strategy", "OK", "ERR", "UNSUP", "PingOK", "PingFail")
+        $colWidths = @(32, 5, 5, 7, 8, 9)
+    } else {
+        $headers   = @("Strategy", "OK", "FAIL", "UNSUP", "BLOCKED")
+        $colWidths = @(32, 5, 6, 7, 9)
+    }
+
+    $totalWidth = ($colWidths | Measure-Object -Sum).Sum
+    $separator  = "-" * $totalWidth
+
+    # Build header line
+    $headerLine = ""
+    for ($i = 0; $i -lt $headers.Count; $i++) {
+        $headerLine += $headers[$i].PadRight($colWidths[$i])
+    }
+
+    # Find best OK score for highlighting
+    $maxScore = ($Analytics.Values | ForEach-Object { $_.OK } | Measure-Object -Maximum).Maximum
+
+    Write-Host ""
+    Write-Host "=== SUMMARY TABLE ===" -ForegroundColor Cyan
+    Write-Host $separator -ForegroundColor DarkGray
+    Write-Host $headerLine -ForegroundColor White
+    Write-Host $separator -ForegroundColor DarkGray
+
+    foreach ($config in $Analytics.Keys) {
+        $a = $Analytics[$config]
+
+        # Highlight row with the highest OK count in green, rest in gray
+        $rowColor = if ($a.OK -eq $maxScore -and $maxScore -gt 0) { "Green" } else { "Gray" }
+
+        # Truncate strategy name if too long to keep table aligned
+        $name = $config
+        if ($name.Length -gt ($colWidths[0] - 1)) {
+            $name = $name.Substring(0, $colWidths[0] - 4) + "..."
+        }
+
+        $row = $name.PadRight($colWidths[0])
+
+        if ($isStandard) {
+            $row += $a.OK.ToString().PadRight($colWidths[1])
+            $row += $a.ERROR.ToString().PadRight($colWidths[2])
+            $row += $a.UNSUP.ToString().PadRight($colWidths[3])
+            $row += $a.PingOK.ToString().PadRight($colWidths[4])
+            $row += $a.PingFail.ToString().PadRight($colWidths[5])
+        } else {
+            $row += $a.OK.ToString().PadRight($colWidths[1])
+            $row += $a.FAIL.ToString().PadRight($colWidths[2])
+            $row += $a.UNSUPPORTED.ToString().PadRight($colWidths[3])
+            $row += $a.LIKELY_BLOCKED.ToString().PadRight($colWidths[4])
+        }
+
+        Write-Host $row -ForegroundColor $rowColor
+    }
+
+    Write-Host $separator -ForegroundColor DarkGray
+}
+
 # Check Admin
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -374,7 +443,7 @@ if (-not (Get-Command "curl.exe" -ErrorAction SilentlyContinue)) {
     Write-Host "[OK] curl.exe found" -ForegroundColor Green
 }
 
-# Check for leftover ipset flag
+# Check for leftover ipset flag from a previous interrupted run
 $ipsetFlagFile = Join-Path $rootDir "ipset_switched.flag"
 if (Test-Path $ipsetFlagFile) {
     Write-Host "[INFO] Detected leftover ipset switch flag. Restoring ipset..." -ForegroundColor Yellow
@@ -393,7 +462,7 @@ if ($originalIpsetStatus -ne "any") {
     Write-Host "[WARNING] It will be restored automatically on the next script run." -ForegroundColor Yellow
 }
 
-# Check if MuZap service installed
+# Check if MuZap service is installed (conflicts with tests)
 if (Test-MuZapServiceConflict) {
     Write-Host "[ERROR] Windows service 'MuZap' is installed" -ForegroundColor Red
     Write-Host "         Remove the service before running tests" -ForegroundColor Yellow
@@ -421,10 +490,10 @@ if (-not (Test-Path $iniFile)) {
 }
 
 $allStrategies = Get-StrategiesFromIni -IniPath $iniFile
-$binPath = Join-Path $rootDir "bin\"
-$winwsExe = Join-Path $binPath "winws.exe"
-$listsPath = Join-Path $rootDir "lists\"
-$gamePorts = Get-GameFilterPorts
+$binPath       = Join-Path $rootDir "bin\"
+$winwsExe      = Join-Path $binPath "winws.exe"
+$listsPath     = Join-Path $rootDir "lists\"
+$gamePorts     = Get-GameFilterPorts
 
 $globalResults = @()
 
@@ -486,12 +555,14 @@ function Read-ConfigSelection {
         }
 
         $selectedIndices = @()
+
+        # Use a local-scope flag to avoid polluting the outer $hasErrors
         $local:selectionHasWarnings = $false
 
         foreach ($part in $parts) {
             if ($part -match '^(\d+)-(\d+)$') {
                 $start = [int]$matches[1]
-                $end = [int]$matches[2]
+                $end   = [int]$matches[2]
 
                 if ($start -gt $end) {
                     Write-Host "  [WARN] Invalid range '$part' (start > end). Skipping." -ForegroundColor Yellow
@@ -503,7 +574,7 @@ function Read-ConfigSelection {
                     Write-Host "  [WARN] Range '$part' out of bounds (valid: 1-$($allConfigs.Count)). Skipping invalid parts." -ForegroundColor Yellow
                     $local:selectionHasWarnings = $true
                     $start = [Math]::Max($start, 1)
-                    $end = [Math]::Min($end, $allConfigs.Count)
+                    $end   = [Math]::Min($end, $allConfigs.Count)
                 }
 
                 for ($i = $start; $i -le $end; $i++) {
@@ -539,7 +610,7 @@ function Read-ConfigSelection {
 while ($true) {
     $globalResults = @()
     $testType = Read-TestType
-    $mode = Read-ModeSelection
+    $mode     = Read-ModeSelection
 
     $strategiesToTest = @($allStrategies)
     if ($mode -eq 'select') {
@@ -551,7 +622,7 @@ while ($true) {
     $maxNameLen = 10
     if ($testType -eq 'standard') {
         $targetsFile = Join-Path $utilsDir "targets.txt"
-        $rawTargets = New-OrderedDict
+        $rawTargets  = New-OrderedDict
         if (Test-Path $targetsFile) {
             Get-Content $targetsFile | ForEach-Object {
                 if ($_ -match '^\s*(\w+)\s*=\s*"(.+)"\s*$') {
@@ -574,6 +645,9 @@ while ($true) {
             Add-OrSet $rawTargets "Google Gstatic"         "https://www.gstatic.com"
             Add-OrSet $rawTargets "Cloudflare Web"         "https://www.cloudflare.com"
             Add-OrSet $rawTargets "Cloudflare CDN"         "https://cdnjs.cloudflare.com"
+            Add-OrSet $rawTargets "Telegram Main"          "https://telegram.org"
+            Add-OrSet $rawTargets "Telegram Short"         "https://t.me"
+            Add-OrSet $rawTargets "Telegram Web"           "https://web.telegram.org"
             Add-OrSet $rawTargets "Cloudflare DNS 1.1.1.1" "PING:1.1.1.1"
             Add-OrSet $rawTargets "Cloudflare DNS 1.0.0.1" "PING:1.0.0.1"
             Add-OrSet $rawTargets "Google DNS 8.8.8.8"     "PING:8.8.8.8"
@@ -601,7 +675,6 @@ while ($true) {
         exit 1
     }
 
-    # Stop winws
     function Stop-Zapret {
         Get-Process -Name "winws" -ErrorAction SilentlyContinue | Stop-Process -Force
     }
@@ -615,9 +688,9 @@ while ($true) {
         )
 
         $percent = [math]::Round(($Current - 1) / [math]::Max($Total, 1) * 100)
-        $filled = [math]::Round($percent / 5)
-        $empty = 20 - $filled
-        $bar = "=" * $filled + ">" + " " * $empty
+        $filled  = [math]::Round($percent / 5)
+        $empty   = 20 - $filled
+        $bar     = "=" * $filled + ">" + " " * $empty
 
         $etaStr = ""
         if ($EtaSeconds -ne $null -and $EtaSeconds -gt 0) {
@@ -630,11 +703,9 @@ while ($true) {
             }
         }
 
-        $title = "MuZap Tests [$bar] $Current/$Total$etaStr | $ConfigName"
-        $host.UI.RawUI.WindowTitle = $title
+        $host.UI.RawUI.WindowTitle = "MuZap Tests [$bar] $Current/$Total$etaStr | $ConfigName"
     }
 
-    # Capture/restore running winws instances
     function Get-WinwsSnapshot {
         try {
             return Get-CimInstance Win32_Process -Filter "Name='winws.exe'" |
@@ -655,7 +726,6 @@ while ($true) {
         Write-Host "[INFO] Restoring previously running winws instances..." -ForegroundColor DarkGray
         foreach ($p in $snapshot) {
             if (-not $p.ExecutablePath) { continue }
-
             if ($current -and $current -contains $p.CommandLine) { continue }
 
             $exe = $p.ExecutablePath
@@ -684,7 +754,6 @@ while ($true) {
     Write-Host "============================================================" -ForegroundColor Cyan
 
     try {
-        # Save original ipset status and switch to 'any' for accurate DPI tests
         if (($originalIpsetStatus -ne "any") -and ($testType -eq 'dpi')) {
             Write-Host "[WARNING] Ipset is in '$originalIpsetStatus' mode. Switching to 'any' for accurate DPI tests..." -ForegroundColor Yellow
             Set-IpsetMode -mode "any"
@@ -692,9 +761,10 @@ while ($true) {
         }
         Write-Host "[WARNING] Tests may take several minutes to complete. Please wait..." -ForegroundColor Yellow
 
-        $configNum = 0
+        $configNum      = 0
         $completedTimes = @()
-        $currentEta = $null
+        $currentEta     = $null
+
         foreach ($strategy in $strategiesToTest) {
             $configNum++
             $configStartTime = Get-Date
@@ -706,28 +776,23 @@ while ($true) {
             Write-Host "  [$configNum/$($strategiesToTest.Count)] $($strategy.Name) - $($strategy.Description)" -ForegroundColor Yellow
             Write-Host "------------------------------------------------------------" -ForegroundColor DarkCyan
 
-            # Cleanup
             Stop-Zapret
 
-            # Prepare args
-            $rawParams = $strategy.Params
-            $finalParams = $rawParams -replace '%BIN%', $binPath `
-                                     -replace '%LISTS%', $listsPath `
-                                     -replace '%GameFilterTCP%', $gamePorts.TCP `
-                                     -replace '%GameFilterUDP%', $gamePorts.UDP
+            $rawParams   = $strategy.Params
+            $finalParams = $rawParams -replace '%BIN%',          $binPath `
+                                      -replace '%LISTS%',        $listsPath `
+                                      -replace '%GameFilterTCP%', $gamePorts.TCP `
+                                      -replace '%GameFilterUDP%', $gamePorts.UDP
 
-            # Start config
             Write-Host "  > Starting config..." -ForegroundColor Cyan
             $proc = Start-Process -FilePath $winwsExe -ArgumentList $finalParams -WorkingDirectory $binPath -PassThru -WindowStyle Minimized
 
-            # Wait init
             Start-Sleep -Seconds 5
 
             if ($testType -eq 'standard') {
                 $curlTimeoutSeconds = 5
-
-                $maxParallel = 8
-                $runspacePool = [runspacefactory]::CreateRunspacePool(1, $maxParallel)
+                $maxParallel        = 8
+                $runspacePool       = [runspacefactory]::CreateRunspacePool(1, $maxParallel)
                 $runspacePool.Open()
 
                 $scriptBlock = {
@@ -746,8 +811,8 @@ while ($true) {
                         foreach ($test in $tests) {
                             try {
                                 $curlArgs = $baseArgs + $test.Args
-                                $stderr = $null
-                                $output = & curl.exe @curlArgs $t.Url 2>&1 | ForEach-Object {
+                                $stderr   = $null
+                                $output   = & curl.exe @curlArgs $t.Url 2>&1 | ForEach-Object {
                                     if ($_ -is [System.Management.Automation.ErrorRecord]) {
                                         $stderr += $_.Exception.Message + " "
                                     } else {
@@ -768,8 +833,7 @@ while ($true) {
                                     continue
                                 }
 
-                                $ok = ($LASTEXITCODE -eq 0)
-                                if ($ok) {
+                                if ($LASTEXITCODE -eq 0) {
                                     $httpPieces += "$($test.Label):OK   "
                                 } else {
                                     $httpPieces += "$($test.Label):ERROR"
@@ -783,8 +847,8 @@ while ($true) {
                     $pingResult = "n/a"
                     if ($t.PingTarget) {
                         try {
-                            $pings = Test-Connection -ComputerName $t.PingTarget -Count 3 -ErrorAction Stop
-                            $avg = ($pings | Measure-Object -Property ResponseTime -Average).Average
+                            $pings  = Test-Connection -ComputerName $t.PingTarget -Count 3 -ErrorAction Stop
+                            $avg    = ($pings | Measure-Object -Property ResponseTime -Average).Average
                             $pingResult = "{0:N0} ms" -f $avg
                         } catch {
                             $pingResult = "Timeout"
@@ -812,8 +876,7 @@ while ($true) {
                     }
                 }
 
-                $script:currentLine = "  > Running tests..."
-                Write-Host $script:currentLine -ForegroundColor DarkGray
+                Write-Host "  > Running tests..." -ForegroundColor DarkGray
 
                 $targetResults = @()
                 foreach ($rs in $runspaces) {
@@ -857,42 +920,33 @@ while ($true) {
                             Write-Host " $tok" -NoNewline -ForegroundColor $tokColor
                         }
                         Write-Host " | Ping: " -NoNewline -ForegroundColor DarkGray
-                        if ($res.PingResult -eq "Timeout") {
-                            $pingColor = "Yellow"
-                        } else {
-                            $pingColor = "Cyan"
-                        }
+                        $pingColor = if ($res.PingResult -eq "Timeout") { "Yellow" } else { "Cyan" }
                         Write-Host "$($res.PingResult)" -NoNewline -ForegroundColor $pingColor
                         Write-Host ""
                     } else {
                         Write-Host " Ping: " -NoNewline -ForegroundColor DarkGray
-                        if ($res.PingResult -eq "Timeout") {
-                            $pingColor = "Red"
-                        } else {
-                            $pingColor = "Cyan"
-                        }
+                        $pingColor = if ($res.PingResult -eq "Timeout") { "Red" } else { "Cyan" }
                         Write-Host "$($res.PingResult)" -ForegroundColor $pingColor
                     }
                 }
 
                 $globalResults += @{ Config = $strategy.Name; Type = 'standard'; Results = $targetResults }
+
             } else {
                 Write-Host "  > Running DPI checkers..." -ForegroundColor DarkGray
-                $dpiResults = Invoke-DpiSuite -Targets $dpiTargets -TimeoutSeconds $dpiTimeoutSeconds -RangeBytes $dpiRangeBytes -MaxParallel $dpiMaxParallel
+                $dpiResults     = Invoke-DpiSuite -Targets $dpiTargets -TimeoutSeconds $dpiTimeoutSeconds -RangeBytes $dpiRangeBytes -MaxParallel $dpiMaxParallel
                 $globalResults += @{ Config = $strategy.Name; Type = 'dpi'; Results = $dpiResults }
             }
 
-            # Stop
             Stop-Zapret
             if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
 
-            # Track timing and ETA
-            $configEndTime = Get-Date
-            $configElapsed = ($configEndTime - $configStartTime).TotalSeconds
+            $configEndTime  = Get-Date
+            $configElapsed  = ($configEndTime - $configStartTime).TotalSeconds
             $completedTimes += $configElapsed
-            $avgTime = ($completedTimes | Measure-Object -Average).Average
-            $remaining = $strategiesToTest.Count - $configNum
-            $currentEta = $avgTime * $remaining
+            $avgTime        = ($completedTimes | Measure-Object -Average).Average
+            $remaining      = $strategiesToTest.Count - $configNum
+            $currentEta     = $avgTime * $remaining
 
             Write-Host ""
             Write-Host "  Config finished in $([math]::Round($configElapsed, 1))s" -ForegroundColor DarkGray
@@ -910,13 +964,15 @@ while ($true) {
         Write-Host ""
         Write-Host "All tests finished." -ForegroundColor Green
 
-        # Analytics
+        # Build analytics
         $analytics = @{}
         foreach ($res in $globalResults) {
             if ($res.Type -eq 'standard') {
                 foreach ($targetRes in $res.Results) {
                     $config = $res.Config
-                    if (-not $analytics.ContainsKey($config)) { $analytics[$config] = @{ OK = 0; ERROR = 0; UNSUP = 0; PingOK = 0; PingFail = 0 } }
+                    if (-not $analytics.ContainsKey($config)) {
+                        $analytics[$config] = @{ OK = 0; ERROR = 0; UNSUP = 0; PingOK = 0; PingFail = 0 }
+                    }
                     if ($targetRes.IsUrl) {
                         foreach ($tok in $targetRes.HttpTokens) {
                             if ($tok -match "OK")    { $analytics[$config].OK++ }
@@ -925,12 +981,18 @@ while ($true) {
                             elseif ($tok -match "UNSUP") { $analytics[$config].UNSUP++ }
                         }
                     }
-                    if ($targetRes.PingResult -ne "Timeout" -and $targetRes.PingResult -ne "n/a") { $analytics[$config].PingOK++ } else { $analytics[$config].PingFail++ }
+                    if ($targetRes.PingResult -ne "Timeout" -and $targetRes.PingResult -ne "n/a") {
+                        $analytics[$config].PingOK++
+                    } else {
+                        $analytics[$config].PingFail++
+                    }
                 }
             } elseif ($res.Type -eq 'dpi') {
                 foreach ($targetRes in $res.Results) {
                     $config = $res.Config
-                    if (-not $analytics.ContainsKey($config)) { $analytics[$config] = @{ OK = 0; FAIL = 0; UNSUPPORTED = 0; LIKELY_BLOCKED = 0 } }
+                    if (-not $analytics.ContainsKey($config)) {
+                        $analytics[$config] = @{ OK = 0; FAIL = 0; UNSUPPORTED = 0; LIKELY_BLOCKED = 0 }
+                    }
                     foreach ($line in $targetRes.Lines) {
                         if ($line.Status -eq "OK")             { $analytics[$config].OK++ }
                         elseif ($line.Status -eq "FAIL")           { $analytics[$config].FAIL++ }
@@ -941,6 +1003,7 @@ while ($true) {
             }
         }
 
+        # Per-strategy analytics lines
         Write-Host ""
         Write-Host "=== ANALYTICS ===" -ForegroundColor Cyan
         foreach ($config in $analytics.Keys) {
@@ -952,26 +1015,24 @@ while ($true) {
             }
         }
 
+        # Summary comparison table
+        Write-SummaryTable -Analytics $analytics
+
         # Determine best strategy
         $bestConfig = $null
-        $maxScore = 0
-        $maxPing = -1
+        $maxScore   = 0
+        $maxPing    = -1
         foreach ($config in $analytics.Keys) {
-            $a = $analytics[$config]
-            $score = $a.OK
-            $pingScore = 0
-            if ($a.ContainsKey('PingOK')) {
-                $pingScore = $a.PingOK
-            }
+            $a         = $analytics[$config]
+            $score     = $a.OK
+            $pingScore = if ($a.ContainsKey('PingOK')) { $a.PingOK } else { 0 }
             if ($score -gt $maxScore) {
-                $maxScore = $score
-                $maxPing = $pingScore
+                $maxScore   = $score
+                $maxPing    = $pingScore
                 $bestConfig = $config
-            } elseif ($score -eq $maxScore) {
-                if ($pingScore -gt $maxPing) {
-                    $maxPing = $pingScore
-                    $bestConfig = $config
-                }
+            } elseif ($score -eq $maxScore -and $pingScore -gt $maxPing) {
+                $maxPing    = $pingScore
+                $bestConfig = $config
             }
         }
         Write-Host ""
@@ -979,12 +1040,13 @@ while ($true) {
         Write-Host ""
 
         # Save results to file
-        $dateStr = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+        $dateStr    = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
         $resultFile = Join-Path $resultsDir "test_results_$dateStr.txt"
         "" | Out-File $resultFile -Encoding UTF8
+
         foreach ($res in $globalResults) {
-            $config = $res.Config
-            $type = $res.Type
+            $config  = $res.Config
+            $type    = $res.Type
             $results = $res.Results
             Add-Content $resultFile "Config: $config (Type: $type)"
             if ($type -eq 'standard') {
@@ -996,13 +1058,13 @@ while ($true) {
                 }
             } elseif ($type -eq 'dpi') {
                 foreach ($targetRes in $results) {
-                    $id = $targetRes.TargetId
+                    $id       = $targetRes.TargetId
                     $provider = $targetRes.Provider
                     Add-Content $resultFile "  Target: $id ($provider)"
                     foreach ($line in $targetRes.Lines) {
-                        $test = $line.TestLabel
-                        $code = $line.Code
-                        $size = "$($line.UpKB)up/$($line.DownKB)down"
+                        $test   = $line.TestLabel
+                        $code   = $line.Code
+                        $size   = "$($line.UpKB)up/$($line.DownKB)down"
                         $status = $line.Status
                         Add-Content $resultFile "    ${test}: code=${code} buf=${size} KB status=${status}"
                     }
@@ -1011,7 +1073,7 @@ while ($true) {
             Add-Content $resultFile ""
         }
 
-        # Add analytics to file
+        # Analytics to file
         Add-Content $resultFile "=== ANALYTICS ==="
         foreach ($config in $analytics.Keys) {
             $a = $analytics[$config]
@@ -1021,7 +1083,30 @@ while ($true) {
                 Add-Content $resultFile "$config : OK: $($a.OK), FAIL: $($a.FAIL), UNSUP: $($a.UNSUPPORTED), BLOCKED: $($a.LIKELY_BLOCKED)"
             }
         }
+        Add-Content $resultFile ""
+        Add-Content $resultFile "=== SUMMARY TABLE ==="
 
+        # Summary table to file (plain text, no colors)
+        $firstKey   = ($analytics.Keys | Select-Object -First 1)
+        $isStandard = $analytics[$firstKey].ContainsKey('PingOK')
+        if ($isStandard) {
+            Add-Content $resultFile ("Strategy".PadRight(32) + "OK".PadRight(5) + "ERR".PadRight(5) + "UNSUP".PadRight(7) + "PingOK".PadRight(8) + "PingFail")
+        } else {
+            Add-Content $resultFile ("Strategy".PadRight(32) + "OK".PadRight(5) + "FAIL".PadRight(6) + "UNSUP".PadRight(7) + "BLOCKED")
+        }
+        Add-Content $resultFile ("-" * 64)
+        foreach ($config in $analytics.Keys) {
+            $a    = $analytics[$config]
+            $name = $config
+            if ($name.Length -gt 31) { $name = $name.Substring(0, 28) + "..." }
+            if ($isStandard) {
+                Add-Content $resultFile ($name.PadRight(32) + $a.OK.ToString().PadRight(5) + $a.ERROR.ToString().PadRight(5) + $a.UNSUP.ToString().PadRight(7) + $a.PingOK.ToString().PadRight(8) + $a.PingFail.ToString())
+            } else {
+                Add-Content $resultFile ($name.PadRight(32) + $a.OK.ToString().PadRight(5) + $a.FAIL.ToString().PadRight(6) + $a.UNSUPPORTED.ToString().PadRight(7) + $a.LIKELY_BLOCKED.ToString())
+            }
+        }
+
+        Add-Content $resultFile ""
         Add-Content $resultFile "Best strategy: $bestConfig"
 
         Write-Host "Results saved to $resultFile" -ForegroundColor Green

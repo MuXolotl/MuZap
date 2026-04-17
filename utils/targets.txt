@@ -1,8 +1,8 @@
-# targets.txt - endpoint list for zapret.ps1 tests
+# targets.txt - endpoint list for test_muzap.ps1 tests
 #
 # Format:
 #   KeyName = "https://host..."   -> Runs HTTP/TLS checks + ping
-#   KeyName = "PING:1.2.3.4"       -> Ping only
+#   KeyName = "PING:1.2.3.4"      -> Ping only
 #
 # Keys must be a single word (letters/digits/underscore), because the
 # script parses them as simple identifiers. You can add or remove lines.
@@ -26,6 +26,11 @@ GoogleGstatic         = "https://www.gstatic.com"
 ### Cloudflare
 CloudflareWeb         = "https://www.cloudflare.com"
 CloudflareCDN         = "https://cdnjs.cloudflare.com"
+
+### Telegram
+TelegramMain          = "https://telegram.org"
+TelegramShort         = "https://t.me"
+TelegramWeb           = "https://web.telegram.org"
 
 ### Public DNS (PING-only)
 CloudflareDNS1111     = "PING:1.1.1.1"
