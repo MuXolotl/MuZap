@@ -20,19 +20,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Update version in .service/version.txt
+      - name: Update version in muzap.ini
         run: |
-          echo "${{ github.event.inputs.version }}" > .service/version.txt
-
-      - name: Inject version into MuZap.bat
-        run: |
-          sed -i 's/set "LOCAL_VERSION=.*"/set "LOCAL_VERSION=${{ github.event.inputs.version }}"/' MuZap.bat
+          sed -i 's/^Version=.*/Version=${{ github.event.inputs.version }}/' muzap.ini
 
       - name: Commit version bump
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          git add .service/version.txt MuZap.bat
+          git add muzap.ini
           git commit -m "Bump version to ${{ github.event.inputs.version }}"
           git push
 

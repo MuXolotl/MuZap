@@ -1,10 +1,9 @@
 @echo off
-set "LOCAL_VERSION=1.0.3"
-if exist "%~dp0.service\version.txt" set /p LOCAL_VERSION=<"%~dp0.service\version.txt"
-
 set "CONFIG_FILE=%~dp0muzap.ini"
 call :config_bootstrap
 call :config_load
+
+set "LOCAL_VERSION=%CFG_Version%"
 
 :: External commands
 if "%~1"=="status_zapret" (
@@ -64,9 +63,10 @@ setlocal EnableDelayedExpansion
 cls
 
 call :config_load
+set "LOCAL_VERSION=!CFG_Version!"
+
 call :ipset_switch_status
 call :game_switch_status
-call :check_updates_switch_status
 call :current_strategy_status
 
 set "menu_choice=null"
@@ -76,7 +76,7 @@ echo           MUZAP SERVICE MANAGER v!LOCAL_VERSION!
 echo ================================================
 echo.
 echo   1.  Service      ^| Strategy: !CurrentStrategy!
-echo   2.  Settings     ^| Game: !GameFilterStatus! / Updates: !CheckUpdatesStatus!
+echo   2.  Settings     ^| Game: !GameFilterStatus! / IPSet: !IPsetStatus!
 echo   3.  Updates
 echo   4.  Tools
 echo ------------------------------------------------
@@ -131,7 +131,6 @@ cls
 call :config_load
 call :ipset_switch_status
 call :game_switch_status
-call :check_updates_switch_status
 
 set "menu_choice=null"
 
@@ -141,16 +140,14 @@ echo ================================================
 echo.
 echo   1.  Game Filter     [!GameFilterStatus!]
 echo   2.  IPSet Filter    [!IPsetStatus!]
-echo   3.  Auto-Updates    [!CheckUpdatesStatus!]
 echo ------------------------------------------------
 echo   0.  Back
 echo.
 
-set /p menu_choice=   Select (0-3):
+set /p menu_choice=   Select (0-2):
 
 if "%menu_choice%"=="1" goto game_switch
 if "%menu_choice%"=="2" goto ipset_switch
-if "%menu_choice%"=="3" goto check_updates_switch
 if "%menu_choice%"=="0" goto menu
 goto menu_settings
 
@@ -168,7 +165,7 @@ echo.
 echo   1.  Update IPSet List
 echo   2.  Update Hosts File
 echo   3.  Remove Hosts Entries
-echo   4.  Check for Updates Now
+echo   4.  Check for Updates
 echo ------------------------------------------------
 echo   0.  Back
 echo.
@@ -480,34 +477,81 @@ goto menu_service
 chcp 437 > nul
 cls
 
-set "GITHUB_VERSION_URL=https://raw.githubusercontent.com/MuXolotl/MuZap/main/.service/version.txt"
-set "GITHUB_RELEASE_URL=https://github.com/MuXolotl/MuZap/releases/tag/"
-set "GITHUB_DOWNLOAD_URL=https://github.com/MuXolotl/MuZap/releases/latest"
+call :config_load
+set "LOCAL_VERSION=!CFG_Version!"
 
-for /f "delims=" %%A in ('powershell -NoProfile -Command "(Invoke-WebRequest -Uri \"%GITHUB_VERSION_URL%\" -Headers @{\"Cache-Control\"=\"no-cache\"} -UseBasicParsing -TimeoutSec 5).Content.Trim()" 2^>nul') do set "GITHUB_VERSION=%%A"
+set "GITHUB_API_URL=https://api.github.com/repos/MuXolotl/MuZap/releases/latest"
+set "GITHUB_RELEASE_BASE_URL=https://github.com/MuXolotl/MuZap/releases/tag/"
+
+for /f "delims=" %%A in ('powershell -NoProfile -Command ^
+    "try { $r = Invoke-RestMethod -Uri '%GITHUB_API_URL%' -Headers @{'User-Agent'='MuZap'} -TimeoutSec 10; $r.tag_name -replace '^v','' } catch { '' }" 2^>nul') do set "GITHUB_VERSION=%%A"
 
 if not defined GITHUB_VERSION (
-    echo Warning: failed to fetch the latest version. This warning does not affect the operation of MuZap
-    timeout /T 9
-    if "%1"=="soft" exit /b
-    goto menu_updates
-)
-
-if "%LOCAL_VERSION%"=="%GITHUB_VERSION%" (
-    echo Latest version installed: %LOCAL_VERSION%
-
-    if "%1"=="soft" exit /b
+    call :PrintRed "Warning: failed to fetch the latest version. Check your internet connection."
+    if "%~1"=="soft" exit /b
     pause
     goto menu_updates
 )
 
-echo New version available: %GITHUB_VERSION%
-echo Release page: %GITHUB_RELEASE_URL%%GITHUB_VERSION%
+if "!LOCAL_VERSION!"=="!GITHUB_VERSION!" (
+    call :PrintGreen "Latest version is already installed: !LOCAL_VERSION!"
+    if "%~1"=="soft" exit /b
+    pause
+    goto menu_updates
+)
 
-echo Opening the download page...
-start "" "%GITHUB_DOWNLOAD_URL%"
+echo New version available: !GITHUB_VERSION! (current: !LOCAL_VERSION!)
+echo Release page: %GITHUB_RELEASE_BASE_URL%!GITHUB_VERSION!
+echo.
 
-if "%1"=="soft" exit /b
+if "%~1"=="soft" exit /b
+
+set "UPDATE_CHOICE="
+set /p "UPDATE_CHOICE=Do you want to update now? (Y/N, default: Y): "
+if "!UPDATE_CHOICE!"=="" set "UPDATE_CHOICE=Y"
+if /i "!UPDATE_CHOICE!"=="y" set "UPDATE_CHOICE=Y"
+
+if /i "!UPDATE_CHOICE!" neq "Y" (
+    echo Update cancelled.
+    pause
+    goto menu_updates
+)
+
+set "UPDATE_SCRIPT=%~dp0utils\update.ps1"
+if not exist "%UPDATE_SCRIPT%" (
+    call :PrintRed "update.ps1 not found in utils. Cannot update MuZap."
+    pause
+    goto menu_updates
+)
+
+echo.
+echo Running MuZap updater...
+set "MUZAP_ROOT=%~dp0"
+if "!MUZAP_ROOT:~-1!"=="\" set "MUZAP_ROOT=!MUZAP_ROOT:~0,-1!"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%UPDATE_SCRIPT%" -RootDir "!MUZAP_ROOT!"
+
+if !errorlevel!==0 (
+    echo.
+    call :PrintGreen "MuZap updated successfully."
+    call :PrintYellow "Restarting to apply update..."
+    timeout /t 1 /nobreak > nul
+
+    set "PENDING=%~dp0.service\MuZap.bat.pending"
+    set "MAINBAT=%~f0"
+    set "BAT_HELPER=%TEMP%\muzap_apply.bat"
+
+    (
+        echo @echo off
+        echo timeout /t 2 /nobreak ^> nul
+        echo if exist "!PENDING!" move /y "!PENDING!" "!MAINBAT!"
+        echo start "" "!MAINBAT!"
+        echo del /f /q "%%~f0"
+    ) > "!BAT_HELPER!"
+
+    start "" /b cmd /c "!BAT_HELPER!"
+    exit
+)
+
 pause
 goto menu_updates
 
@@ -654,11 +698,10 @@ if !dohfound!==0 (
 echo:
 
 :: Hosts file check
-:: Checks for manually added entries that could interfere with MuZap-managed domains
 set "hostsFile=%SystemRoot%\System32\drivers\etc\hosts"
 if exist "%hostsFile%" (
 
-    :: YouTube / Google domains (from list-google.txt)
+    :: YouTube / Google domains
     set "yt_found=0"
     for %%D in (youtube.com youtu.be googlevideo.com ytimg.com ggpht.com googleusercontent.com) do (
         >nul 2>&1 findstr /I "%%D" "%hostsFile%" && set "yt_found=1"
@@ -669,7 +712,7 @@ if exist "%hostsFile%" (
         call :PrintGreen "Hosts YouTube/Google check passed"
     )
 
-    :: Discord domains (from list-general.txt)
+    :: Discord domains
     set "dc_found=0"
     for %%D in (discord.com discordapp.com discord.gg discord.media gateway.discord.gg) do (
         >nul 2>&1 findstr /I "%%D" "%hostsFile%" && set "dc_found=1"
@@ -680,13 +723,12 @@ if exist "%hostsFile%" (
         call :PrintGreen "Hosts Discord check passed"
     )
 
-    :: Telegram domains (from .service/hosts — managed by MuZap, so only warn about unexpected entries)
+    :: Telegram domains
     set "tg_found=0"
     for %%D in (telegram.org t.me web.telegram.org api.telegram.org) do (
         >nul 2>&1 findstr /I "%%D" "%hostsFile%" && set "tg_found=1"
     )
     if !tg_found!==1 (
-        :: Entries inside MuZap-managed block are fine; warn only about entries outside the block
         powershell -NoProfile -Command ^
             "$h = Get-Content '%hostsFile%'; $inBlock = $false; $outside = $false;" ^
             "foreach ($l in $h) {" ^
@@ -907,34 +949,6 @@ if "%GameFilterChoice%"=="0" (
 )
 
 call :PrintYellow "Restart MuZap to apply the changes"
-pause
-goto menu_settings
-
-
-:: CHECK UPDATES SWITCH ================
-:check_updates_switch_status
-chcp 437 > nul
-
-if "%CFG_CheckUpdates%"=="1" (
-    set "CheckUpdatesStatus=on"
-) else (
-    set "CheckUpdatesStatus=off"
-)
-exit /b
-
-
-:check_updates_switch
-chcp 437 > nul
-cls
-
-if "%CFG_CheckUpdates%"=="1" (
-    echo Disabling check updates...
-    call :config_set Features CheckUpdates 0
-) else (
-    echo Enabling check updates...
-    call :config_set Features CheckUpdates 1
-)
-
 pause
 goto menu_settings
 
@@ -1214,10 +1228,9 @@ exit /b 0
 :config_bootstrap
 if exist "%CONFIG_FILE%" exit /b
 
-set "BOOT_CheckUpdates=0"
-if exist "%~dp0utils\check_updates.enabled" set "BOOT_CheckUpdates=1"
-
+set "BOOT_CheckUpdates=1"
 set "BOOT_GameFilterMode=off"
+
 if exist "%~dp0utils\game_filter.enabled" (
     for /f "usebackq delims=" %%A in ("%~dp0utils\game_filter.enabled") do (
         if not defined BOOT_GameFilterMode_READ (
@@ -1246,6 +1259,9 @@ if /i "%BOOT_GameFilterMode%"=="all" (
     echo ; Hosts backup:
     echo ;   BackupMode: off ^| once ^| single ^| timestamp
     echo.
+    echo [App]
+    echo Version=1.0.3
+    echo.
     echo [Features]
     echo CheckUpdates=%BOOT_CheckUpdates%
     echo GameFilterMode=%BOOT_GameFilterMode%
@@ -1260,12 +1276,14 @@ exit /b
 :config_load
 setlocal EnableDelayedExpansion
 
+set "CFG_Version=unknown"
 set "CFG_CheckUpdates=1"
 set "CFG_GameFilterMode=off"
 set "CFG_HostsBackupMode=once"
 
 if not exist "%CONFIG_FILE%" (
     endlocal & (
+        set "CFG_Version=unknown"
         set "CFG_CheckUpdates=1"
         set "CFG_GameFilterMode=off"
         set "CFG_HostsBackupMode=once"
@@ -1294,6 +1312,9 @@ for /f "usebackq delims=" %%L in ("%CONFIG_FILE%") do (
             for /f "tokens=* delims= " %%p in ("!k!") do set "k=%%p"
             for /f "tokens=* delims= " %%q in ("!v!") do set "v=%%q"
 
+            if /i "!section!"=="App" (
+                if /i "!k!"=="Version" set "CFG_Version=!v!"
+            )
             if /i "!section!"=="Features" (
                 if /i "!k!"=="CheckUpdates" set "CFG_CheckUpdates=!v!"
                 if /i "!k!"=="GameFilterMode" set "CFG_GameFilterMode=!v!"
@@ -1310,6 +1331,7 @@ if /i "!CFG_GameFilterMode!" NEQ "off" if /i "!CFG_GameFilterMode!" NEQ "all" if
 if /i "!CFG_HostsBackupMode!" NEQ "off" if /i "!CFG_HostsBackupMode!" NEQ "once" if /i "!CFG_HostsBackupMode!" NEQ "single" if /i "!CFG_HostsBackupMode!" NEQ "timestamp" set "CFG_HostsBackupMode=once"
 
 endlocal & (
+    set "CFG_Version=%CFG_Version%"
     set "CFG_CheckUpdates=%CFG_CheckUpdates%"
     set "CFG_GameFilterMode=%CFG_GameFilterMode%"
     set "CFG_HostsBackupMode=%CFG_HostsBackupMode%"
