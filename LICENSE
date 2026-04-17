@@ -1,6 +1,10 @@
 MIT License
 
-Copyright (c) 2026 MuXolotl
+Copyright (c) 2026 MuXolotl (MuZap contributors)
+
+Portions of this software are derived from:
+- "zapret" by bol-van (MIT License)
+- "zapret-discord-youtube" by Flowseal (MIT License)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +23,8 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+Third-party components (binaries, data files, etc.) may be distributed under
+their own licenses and terms. See THIRD_PARTY_NOTICES.md for details.
