@@ -595,7 +595,7 @@ if !errorlevel!==0 set "checkpointFound=1"
 sc query | findstr /I "EPWD" > nul
 if !errorlevel!==0 set "checkpointFound=1"
 
-if !checkpointFound!==0 (
+if !checkpointFound!==1 (
     call :PrintRed "[X] Check Point services found. Check Point conflicts with MuZap"
     call :PrintRed "Try to uninstall Check Point"
 ) else (
@@ -771,8 +771,6 @@ set "found_conflicts="
 for %%s in (!conflicting_services!) do (
     sc query "%%s" >nul 2>&1
     if !errorlevel!==0 (
-        rem not installed
-    ) else (
         if "!found_conflicts!"=="" (
             set "found_conflicts=%%s"
         ) else (
@@ -1320,39 +1318,9 @@ exit /b
 
 
 :config_set
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "& { param([string]$path,[string]$section,[string]$key,[string]$value) " ^
-  "  if (-not $section) { throw 'section is empty' } " ^
-  "  if (-not $key) { throw 'key is empty' } " ^
-  "  if (-not (Test-Path -LiteralPath $path)) { New-Item -ItemType File -Path $path -Force | Out-Null } " ^
-  "  $lines = @(); " ^
-  "  try { $lines = Get-Content -LiteralPath $path -ErrorAction SilentlyContinue } catch { $lines = @() } " ^
-  "  $out = New-Object System.Collections.Generic.List[string]; " ^
-  "  $inSection = $false; $sectionFound = $false; $keySet = $false; " ^
-  "  foreach ($line in $lines) { " ^
-  "    $trim = $line.Trim(); " ^
-  "    if ($trim -match '^\[(.+)\]$') { " ^
-  "      if ($inSection -and -not $keySet) { $out.Add($key + '=' + $value); $keySet = $true } " ^
-  "      $cur = $matches[1]; " ^
-  "      if ($cur -ieq $section) { $inSection = $true; $sectionFound = $true } else { $inSection = $false } " ^
-  "      $out.Add($line); " ^
-  "      continue; " ^
-  "    } " ^
-  "    if ($inSection -and ($trim -match '^(?<k>[^=]+)=(?<v>.*)$')) { " ^
-  "      $k = $matches['k'].Trim(); " ^
-  "      if ($k -ieq $key) { $out.Add($key + '=' + $value); $keySet = $true; continue } " ^
-  "    } " ^
-  "    $out.Add($line); " ^
-  "  } " ^
-  "  if ($sectionFound -and -not $keySet) { $out.Add($key + '=' + $value); $keySet = $true } " ^
-  "  if (-not $sectionFound) { " ^
-  "    if ($out.Count -gt 0 -and $out[$out.Count-1].Trim() -ne '') { $out.Add('') } " ^
-  "    $out.Add('[' + $section + ']'); " ^
-  "    $out.Add($key + '=' + $value); " ^
-  "  } " ^
-  "  $enc = New-Object System.Text.UTF8Encoding($false); " ^
-  "  [System.IO.File]::WriteAllLines($path, $out.ToArray(), $enc); " ^
-  "}" ^
-  "%CONFIG_FILE%" "%~1" "%~2" "%~3" >nul 2>&1
-
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0utils\config_set.ps1" ^
+    -Path "%CONFIG_FILE%" ^
+    -Section "%~1" ^
+    -Key "%~2" ^
+    -Value "%~3" >nul 2>&1
 exit /b
