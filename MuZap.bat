@@ -654,13 +654,54 @@ if !dohfound!==0 (
 echo:
 
 :: Hosts file check
+:: Checks for manually added entries that could interfere with MuZap-managed domains
 set "hostsFile=%SystemRoot%\System32\drivers\etc\hosts"
 if exist "%hostsFile%" (
+
+    :: YouTube / Google domains (from list-google.txt)
     set "yt_found=0"
-    >nul 2>&1 findstr /I "youtube.com" "%hostsFile%" && set "yt_found=1"
-    >nul 2>&1 findstr /I "youtu.be" "%hostsFile%" && set "yt_found=1"
+    for %%D in (youtube.com youtu.be googlevideo.com ytimg.com ggpht.com googleusercontent.com) do (
+        >nul 2>&1 findstr /I "%%D" "%hostsFile%" && set "yt_found=1"
+    )
     if !yt_found!==1 (
-        call :PrintYellow "[?] Your hosts file contains entries for youtube.com or youtu.be. This may cause problems with YouTube access"
+        call :PrintYellow "[?] hosts file contains YouTube/Google entries. This may break YouTube or Google Video"
+    ) else (
+        call :PrintGreen "Hosts YouTube/Google check passed"
+    )
+
+    :: Discord domains (from list-general.txt)
+    set "dc_found=0"
+    for %%D in (discord.com discordapp.com discord.gg discord.media gateway.discord.gg) do (
+        >nul 2>&1 findstr /I "%%D" "%hostsFile%" && set "dc_found=1"
+    )
+    if !dc_found!==1 (
+        call :PrintYellow "[?] hosts file contains Discord entries. This may break Discord connectivity"
+    ) else (
+        call :PrintGreen "Hosts Discord check passed"
+    )
+
+    :: Telegram domains (from .service/hosts — managed by MuZap, so only warn about unexpected entries)
+    set "tg_found=0"
+    for %%D in (telegram.org t.me web.telegram.org api.telegram.org) do (
+        >nul 2>&1 findstr /I "%%D" "%hostsFile%" && set "tg_found=1"
+    )
+    if !tg_found!==1 (
+        :: Entries inside MuZap-managed block are fine; warn only about entries outside the block
+        powershell -NoProfile -Command ^
+            "$h = Get-Content '%hostsFile%'; $inBlock = $false; $outside = $false;" ^
+            "foreach ($l in $h) {" ^
+            "  if ($l -match '# --- MuZap BEGIN') { $inBlock = $true; continue }" ^
+            "  if ($l -match '# --- MuZap END')   { $inBlock = $false; continue }" ^
+            "  if (-not $inBlock -and $l -match 'telegram') { $outside = $true }" ^
+            "}" ^
+            "if ($outside) { exit 1 } else { exit 0 }" >nul 2>&1
+        if !errorlevel!==1 (
+            call :PrintYellow "[?] hosts file contains Telegram entries outside MuZap block. This may conflict with MuZap hosts management"
+        ) else (
+            call :PrintGreen "Hosts Telegram check passed (entries are inside MuZap block)"
+        )
+    ) else (
+        call :PrintGreen "Hosts Telegram check passed"
     )
 )
 echo:
