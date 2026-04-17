@@ -904,8 +904,9 @@ set "url=https://raw.githubusercontent.com/MuXolotl/MuZap/main/.service/ipset-se
 
 echo Updating ipset-all...
 
-if exist "%SystemRoot%\System32\curl.exe" (
-    curl -L -f -o "%tempFile%" "%url%"
+where curl.exe >nul 2>&1
+if !errorlevel!==0 (
+    curl -L -f -m 15 -o "%tempFile%" "%url%"
 ) else (
     powershell -NoProfile -Command ^
         "$url = '%url%';" ^
@@ -947,12 +948,12 @@ cls
 set "hostsFile=%SystemRoot%\System32\drivers\etc\hosts"
 set "hostsUrl=https://raw.githubusercontent.com/MuXolotl/MuZap/main/.service/hosts"
 set "tempFile=%TEMP%\muzap_hosts.txt"
-set "needsUpdate=0"
 
 echo Checking hosts file...
 
-if exist "%SystemRoot%\System32\curl.exe" (
-    curl -L -s -o "%tempFile%" "%hostsUrl%"
+where curl.exe >nul 2>&1
+if !errorlevel!==0 (
+    curl -L -f -m 15 -o "%tempFile%" "%hostsUrl%"
 ) else (
     powershell -NoProfile -Command ^
         "$url = '%hostsUrl%';" ^
@@ -962,46 +963,46 @@ if exist "%SystemRoot%\System32\curl.exe" (
 )
 
 if not exist "%tempFile%" (
-    call :PrintRed "Failed to download hosts file from repository"
-    call :PrintYellow "Copy hosts file manually from %hostsUrl%"
+    call :PrintRed "Failed to download hosts file from repository."
     pause
     goto menu
 )
 
-set "firstLine="
-set "lastLine="
-for /f "usebackq delims=" %%a in ("%tempFile%") do (
-    if not defined firstLine (
-        set "firstLine=%%a"
-    )
-    set "lastLine=%%a"
-)
-
-findstr /C:"!firstLine!" "%hostsFile%" >nul 2>&1
+:: Check that we downloaded a valid hosts file, not an HTML error page
+findstr /R "^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*" "%tempFile%" >nul 2>&1
 if !errorlevel! neq 0 (
-    echo First line from repository not found in hosts file
-    set "needsUpdate=1"
+    call :PrintRed "Error: downloaded file seems invalid. Server may have returned an error page."
+    del /f /q "%tempFile%"
+    pause
+    goto menu
 )
 
-findstr /C:"!lastLine!" "%hostsFile%" >nul 2>&1
-if !errorlevel! neq 0 (
-    echo Last line from repository not found in hosts file
-    set "needsUpdate=1"
-)
+:: Merge via PowerShell
+powershell -NoProfile -Command ^
+    "$tempFile = '%tempFile%';" ^
+    "$hostsFile = '%hostsFile%';" ^
+    "$existing = [System.IO.File]::ReadAllLines($hostsFile);" ^
+    "$new = [System.IO.File]::ReadAllLines($tempFile);" ^
+    "$toAdd = @();" ^
+    "$added = 0;" ^
+    "$skipped = 0;" ^
+    "foreach ($line in $new) {" ^
+    "    $trimmed = $line.Trim();" ^
+    "    if ($trimmed -eq '' -or $trimmed.StartsWith('#')) { continue };" ^
+    "    if ($existing -contains $trimmed) { $skipped++; continue };" ^
+    "    $toAdd += $trimmed;" ^
+    "    $added++;" ^
+    "};" ^
+    "if ($toAdd.Count -gt 0) {" ^
+    "    [System.IO.File]::AppendAllLines($hostsFile, [string[]]$toAdd);" ^
+    "};" ^
+    "Write-Host \"Added: $added lines, Skipped: $skipped lines (already present).\""
 
-if "%needsUpdate%"=="1" (
-    echo:
-    call :PrintYellow "Hosts file needs to be updated"
-    call :PrintYellow "Please manually copy the content from the downloaded file to your hosts file"
-    
-    start notepad "%tempFile%"
-    explorer /select,"%hostsFile%"
-) else (
-    call :PrintGreen "Hosts file is up to date"
-    if exist "%tempFile%" del /f /q "%tempFile%"
-)
+if exist "%tempFile%" del /f /q "%tempFile%"
 
-echo:
+echo.
+call :PrintGreen "Hosts file update complete."
+
 pause
 goto menu
 
