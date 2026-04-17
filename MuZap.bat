@@ -58,7 +58,7 @@ if "%1"=="admin" (
 )
 
 
-:: MENU ================================
+:: MAIN MENU ===========================
 setlocal EnableDelayedExpansion
 :menu
 cls
@@ -73,50 +73,138 @@ set "menu_choice=null"
 
 echo.
 echo   MUZAP SERVICE MANAGER v!LOCAL_VERSION!
-echo   ----------------------------------------
+echo   ==========================================
 echo.
-echo   :: SERVICE
-echo      1.  Install Service     [!CurrentStrategy!]
-echo      2.  Restart Service
-echo      3.  Remove Services
-echo      4.  Check Status
-echo.
-echo   :: SETTINGS
-echo      5.  Game Filter         [!GameFilterStatus!]
-echo      6.  IPSet Filter        [!IPsetStatus!]
-echo      7.  Auto-Update Check   [!CheckUpdatesStatus!]
-echo.
-echo   :: UPDATES
-echo      8.  Update IPSet List
-echo      9.  Update Hosts File
-echo      10. Remove Hosts Entries
-echo      11. Check for Updates
-echo.
-echo   :: TOOLS
-echo      12. Run Diagnostics
-echo      13. Run Tests
-echo.
-echo   ----------------------------------------
-echo      0. Exit
+echo   1.  Service      ^| Strategy: !CurrentStrategy!
+echo   2.  Settings     ^| Game: !GameFilterStatus!  Updates: !CheckUpdatesStatus!
+echo   3.  Updates
+echo   4.  Tools
+echo   ------------------------------------------
+echo   0.  Exit
 echo.
 
-set /p menu_choice=   Select option (0-13):
+set /p menu_choice=   Select (0-4):
+
+if "%menu_choice%"=="1" goto menu_service
+if "%menu_choice%"=="2" goto menu_settings
+if "%menu_choice%"=="3" goto menu_updates
+if "%menu_choice%"=="4" goto menu_tools
+if "%menu_choice%"=="0" exit /b
+goto menu
+
+
+:: SUBMENU: SERVICE ====================
+:menu_service
+cls
+
+call :config_load
+call :current_strategy_status
+
+set "menu_choice=null"
+
+echo.
+echo   SERVICE MANAGEMENT
+echo   ==========================================
+echo.
+echo   1.  Install / Change Strategy  [!CurrentStrategy!]
+echo   2.  Restart
+echo   3.  Remove
+echo   4.  Status
+echo   ------------------------------------------
+echo   0.  Back
+echo.
+
+set /p menu_choice=   Select (0-4):
 
 if "%menu_choice%"=="1" goto service_install
 if "%menu_choice%"=="2" goto service_restart
 if "%menu_choice%"=="3" goto service_remove
 if "%menu_choice%"=="4" goto service_status
-if "%menu_choice%"=="5" goto game_switch
-if "%menu_choice%"=="6" goto ipset_switch
-if "%menu_choice%"=="7" goto check_updates_switch
-if "%menu_choice%"=="8" goto ipset_update
-if "%menu_choice%"=="9" goto hosts_update
-if "%menu_choice%"=="10" goto hosts_remove
-if "%menu_choice%"=="11" goto service_check_updates
-if "%menu_choice%"=="12" goto service_diagnostics
-if "%menu_choice%"=="13" goto run_tests
-if "%menu_choice%"=="0" exit /b
-goto menu
+if "%menu_choice%"=="0" goto menu
+goto menu_service
+
+
+:: SUBMENU: SETTINGS ===================
+:menu_settings
+cls
+
+call :config_load
+call :ipset_switch_status
+call :game_switch_status
+call :check_updates_switch_status
+
+set "menu_choice=null"
+
+echo.
+echo   SETTINGS
+echo   ==========================================
+echo.
+echo   1.  Game Filter     [!GameFilterStatus!]
+echo   2.  IPSet Filter    [!IPsetStatus!]
+echo   3.  Auto-Updates    [!CheckUpdatesStatus!]
+echo   ------------------------------------------
+echo   0.  Back
+echo.
+
+set /p menu_choice=   Select (0-3):
+
+if "%menu_choice%"=="1" goto game_switch
+if "%menu_choice%"=="2" goto ipset_switch
+if "%menu_choice%"=="3" goto check_updates_switch
+if "%menu_choice%"=="0" goto menu
+goto menu_settings
+
+
+:: SUBMENU: UPDATES ====================
+:menu_updates
+cls
+
+set "menu_choice=null"
+
+echo.
+echo   UPDATES
+echo   ==========================================
+echo.
+echo   1.  Update IPSet List
+echo   2.  Update Hosts File
+echo   3.  Remove Hosts Entries
+echo   4.  Check for Updates Now
+echo   ------------------------------------------
+echo   0.  Back
+echo.
+
+set /p menu_choice=   Select (0-4):
+
+if "%menu_choice%"=="1" goto ipset_update
+if "%menu_choice%"=="2" goto hosts_update
+if "%menu_choice%"=="3" goto hosts_remove
+if "%menu_choice%"=="4" goto service_check_updates
+if "%menu_choice%"=="0" goto menu
+goto menu_updates
+
+
+:: SUBMENU: TOOLS ======================
+:menu_tools
+cls
+
+set "menu_choice=null"
+
+echo.
+echo   TOOLS
+echo   ==========================================
+echo.
+echo   1.  Run Diagnostics
+echo   2.  Run Tests
+echo   ------------------------------------------
+echo   0.  Back
+echo.
+
+set /p menu_choice=   Select (0-2):
+
+if "%menu_choice%"=="1" goto service_diagnostics
+if "%menu_choice%"=="2" goto run_tests
+if "%menu_choice%"=="0" goto menu
+goto menu_tools
 
 
 :: LOAD USER LISTS =====================
@@ -169,7 +257,7 @@ if !errorlevel!==0 (
 )
 
 pause
-goto menu
+goto menu_service
 
 :test_service
 set "ServiceName=%~1"
@@ -227,7 +315,7 @@ net stop "WinDivert14" >nul 2>&1
 sc delete "WinDivert14" >nul 2>&1
 
 pause
-goto menu
+goto menu_service
 
 
 :: RESTART =============================
@@ -239,7 +327,7 @@ sc query "MuZap" >nul 2>&1
 if !errorlevel! neq 0 (
     call :PrintRed "Service MuZap is not installed. Use Install Service first."
     pause
-    goto menu
+    goto menu_service
 )
 
 echo Restarting MuZap service...
@@ -253,7 +341,7 @@ if !errorlevel!==0 (
 )
 
 pause
-goto menu
+goto menu_service
 
 
 :: INSTALL =============================
@@ -270,7 +358,7 @@ set "INI_FILE=%~dp0strategies.ini"
 if not exist "%INI_FILE%" (
     call :PrintRed "strategies.ini NOT found in root directory."
     pause
-    goto menu
+    goto menu_service
 )
 
 :: Load game filter variables first so they can be substituted
@@ -304,14 +392,14 @@ set /p "choice=Input strategy index (number): "
 if "!choice!"=="" (
     echo The choice is empty, exiting...
     pause
-    goto menu
+    goto menu_service
 )
 
 set "selectedSection=!section%choice%!"
 if not defined selectedSection (
     echo Invalid choice, exiting...
     pause
-    goto menu
+    goto menu_service
 )
 
 :: Find and read the Params for selectedSection
@@ -339,11 +427,10 @@ for /f "usebackq tokens=1,* delims==" %%A in ("%INI_FILE%") do (
 if not defined STRATEGY_PARAMS (
     call :PrintRed "Failed to parse Params for [!selectedSection!]"
     pause
-    goto menu
+    goto menu_service
 )
 
 :: Substitute variables in STRATEGY_PARAMS
-:: We MUST use %%VAR%% to search for the literal text %VAR% and prevent CMD from prematurely evaluating it
 set "ARGS=!STRATEGY_PARAMS:%%BIN%%=%BIN_PATH%!"
 set "ARGS=!ARGS:%%LISTS%%=%LISTS_PATH%!"
 set "ARGS=!ARGS:%%GameFilterTCP%%=%GameFilterTCP%!"
@@ -363,7 +450,6 @@ sc description %SRVCNAME% "MuZap DPI bypass software" >nul 2>&1
 
 :: 2. Overwrite ImagePath directly in registry to bypass sc.exe length limits and safely handle EXCL_MARK
 setlocal disabledelayedexpansion
-:: Replace EXCL_MARK with ^! and escape quotes for registry
 set "ESCAPED_ARGS=%ARGS:EXCL_MARK=^!%"
 set "ESCAPED_ARGS=%ESCAPED_ARGS:"=\"%"
 
@@ -386,7 +472,7 @@ reg add "HKLM\System\CurrentControlSet\Services\MuZap" /v MuZap-strategy /t REG_
 sc start %SRVCNAME%
 
 pause
-goto menu
+goto menu_service
 
 
 :: CHECK UPDATES =======================
@@ -394,29 +480,25 @@ goto menu
 chcp 437 > nul
 cls
 
-:: Set current version and URLs
 set "GITHUB_VERSION_URL=https://raw.githubusercontent.com/MuXolotl/MuZap/main/.service/version.txt"
 set "GITHUB_RELEASE_URL=https://github.com/MuXolotl/MuZap/releases/tag/"
 set "GITHUB_DOWNLOAD_URL=https://github.com/MuXolotl/MuZap/releases/latest"
 
-:: Get the latest version from GitHub
 for /f "delims=" %%A in ('powershell -NoProfile -Command "(Invoke-WebRequest -Uri \"%GITHUB_VERSION_URL%\" -Headers @{\"Cache-Control\"=\"no-cache\"} -UseBasicParsing -TimeoutSec 5).Content.Trim()" 2^>nul') do set "GITHUB_VERSION=%%A"
 
-:: Error handling
 if not defined GITHUB_VERSION (
     echo Warning: failed to fetch the latest version. This warning does not affect the operation of MuZap
     timeout /T 9
     if "%1"=="soft" exit /b
-    goto menu
+    goto menu_updates
 )
 
-:: Version comparison
 if "%LOCAL_VERSION%"=="%GITHUB_VERSION%" (
     echo Latest version installed: %LOCAL_VERSION%
 
     if "%1"=="soft" exit /b
     pause
-    goto menu
+    goto menu_updates
 )
 
 echo New version available: %GITHUB_VERSION%
@@ -427,8 +509,7 @@ start "" "%GITHUB_DOWNLOAD_URL%"
 
 if "%1"=="soft" exit /b
 pause
-goto menu
-
+goto menu_updates
 
 
 :: DIAGNOSTICS =========================
@@ -453,7 +534,7 @@ for /f "tokens=2*" %%A in ('reg query "HKCU\Software\Microsoft\Windows\CurrentVe
     if "%%B"=="0x1" set "proxyEnabled=1"
 )
 
-if !proxyEnabled!==0 (
+if !proxyEnabled!==1 (
     for /f "tokens=2*" %%A in ('reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyServer 2^>nul ^| findstr /i "ProxyServer"') do (
         set "proxyServer=%%B"
     )
@@ -591,7 +672,6 @@ set "winws_running=!errorlevel!"
 sc query "WinDivert" | findstr /I "RUNNING STOP_PENDING" > nul
 set "windivert_running=!errorlevel!"
 
-:: If winws.exe is NOT running (errorlevel!=0) but WinDivert service IS active (errorlevel==0)
 if !winws_running! neq 0 if !windivert_running!==0 (
     call :PrintYellow "[?] winws.exe is not running but WinDivert service is active. Attempting to delete WinDivert..."
 
@@ -727,30 +807,30 @@ if /i "!CHOICE!"=="Y" (
 echo:
 
 pause
-goto menu
+goto menu_tools
 
 
-:: GAME SWITCH ========================
+:: GAME SWITCH =========================
 :game_switch_status
 chcp 437 > nul
 
-set "GameFilterStatus=disabled"
+set "GameFilterStatus=off"
 set "GameFilter=12"
 set "GameFilterTCP=12"
 set "GameFilterUDP=12"
 
 if /i "%CFG_GameFilterMode%"=="all" (
-    set "GameFilterStatus=enabled (TCP and UDP)"
+    set "GameFilterStatus=TCP+UDP"
     set "GameFilter=1024-65535"
     set "GameFilterTCP=1024-65535"
     set "GameFilterUDP=1024-65535"
 ) else if /i "%CFG_GameFilterMode%"=="tcp" (
-    set "GameFilterStatus=enabled (TCP)"
+    set "GameFilterStatus=TCP"
     set "GameFilter=1024-65535"
     set "GameFilterTCP=1024-65535"
     set "GameFilterUDP=12"
 ) else if /i "%CFG_GameFilterMode%"=="udp" (
-    set "GameFilterStatus=enabled (UDP)"
+    set "GameFilterStatus=UDP"
     set "GameFilter=1024-65535"
     set "GameFilterTCP=12"
     set "GameFilterUDP=1024-65535"
@@ -784,22 +864,22 @@ if "%GameFilterChoice%"=="0" (
 ) else (
     echo Invalid choice, exiting...
     pause
-    goto menu
+    goto menu_settings
 )
 
 call :PrintYellow "Restart MuZap to apply the changes"
 pause
-goto menu
+goto menu_settings
 
 
-:: CHECK UPDATES SWITCH =================
+:: CHECK UPDATES SWITCH ================
 :check_updates_switch_status
 chcp 437 > nul
 
 if "%CFG_CheckUpdates%"=="1" (
-    set "CheckUpdatesStatus=enabled"
+    set "CheckUpdatesStatus=on"
 ) else (
-    set "CheckUpdatesStatus=disabled"
+    set "CheckUpdatesStatus=off"
 )
 exit /b
 
@@ -817,10 +897,10 @@ if "%CFG_CheckUpdates%"=="1" (
 )
 
 pause
-goto menu
+goto menu_settings
 
 
-:: IPSET SWITCH =======================
+:: IPSET SWITCH ========================
 :ipset_switch_status
 chcp 437 > nul
 
@@ -884,15 +964,15 @@ if "%IPsetStatus%"=="loaded" (
     ) else (
         echo Error: no backup to restore. Update list from service menu first
         pause
-        goto menu
+        goto menu_settings
     )
 )
 
 pause
-goto menu
+goto menu_settings
 
 
-:: IPSET UPDATE =======================
+:: IPSET UPDATE ========================
 :ipset_update
 chcp 437 > nul
 cls
@@ -919,26 +999,25 @@ if !errorlevel!==0 (
 if not exist "%tempFile%" (
     call :PrintRed "Error: file was not downloaded."
     pause
-    goto menu
+    goto menu_updates
 )
 
-:: Check that we downloaded a CIDR list, not an HTML error page (rough check)
 findstr /R "^[0-9A-Fa-f\.:][0-9A-Fa-f\.:]*/[0-9]" "%tempFile%" >nul 2>&1
 if !errorlevel! neq 0 (
     call :PrintRed "Error: downloaded file contains no CIDR entries. Server may have returned an error page."
     del /f /q "%tempFile%"
     pause
-    goto menu
+    goto menu_updates
 )
 
 move /y "%tempFile%" "%listFile%" >nul 2>&1
 call :PrintGreen "IPSet list updated successfully."
 
 pause
-goto menu
+goto menu_updates
 
 
-:: HOSTS UPDATE =======================
+:: HOSTS UPDATE ========================
 :hosts_update
 chcp 437 > nul
 cls
@@ -951,7 +1030,7 @@ set "helperPs1=%~dp0utils\hosts_manage.ps1"
 if not exist "%helperPs1%" (
     call :PrintRed "hosts_manage.ps1 not found in utils. Cannot update hosts."
     pause
-    goto menu
+    goto menu_updates
 )
 
 echo Downloading hosts entries...
@@ -970,16 +1049,15 @@ if !errorlevel!==0 (
 if not exist "%tempFile%" (
     call :PrintRed "Failed to download hosts file from repository."
     pause
-    goto menu
+    goto menu_updates
 )
 
-:: Quick sanity check (avoid appending HTML)
 findstr /R "^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*" "%tempFile%" >nul 2>&1
 if !errorlevel! neq 0 (
     call :PrintRed "Error: downloaded hosts content seems invalid. Server may have returned an error page."
     del /f /q "%tempFile%"
     pause
-    goto menu
+    goto menu_updates
 )
 
 echo Updating MuZap section in system hosts (BackupMode=%CFG_HostsBackupMode%)...
@@ -988,7 +1066,7 @@ if !errorlevel! neq 0 (
     call :PrintRed "Hosts update failed (PowerShell helper returned error)."
     if exist "%tempFile%" del /f /q "%tempFile%"
     pause
-    goto menu
+    goto menu_updates
 )
 
 if exist "%tempFile%" del /f /q "%tempFile%"
@@ -997,7 +1075,7 @@ echo.
 call :PrintGreen "Hosts file update complete (MuZap section)."
 
 pause
-goto menu
+goto menu_updates
 
 
 :hosts_remove
@@ -1010,7 +1088,7 @@ set "helperPs1=%~dp0utils\hosts_manage.ps1"
 if not exist "%helperPs1%" (
     call :PrintRed "hosts_manage.ps1 not found in utils. Cannot remove hosts section."
     pause
-    goto menu
+    goto menu_updates
 )
 
 echo Removing MuZap section from system hosts (BackupMode=%CFG_HostsBackupMode%)...
@@ -1018,36 +1096,35 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%helperPs1%" -Action Remove
 if !errorlevel! neq 0 (
     call :PrintRed "Hosts remove failed (PowerShell helper returned error)."
     pause
-    goto menu
+    goto menu_updates
 )
 
 echo.
 call :PrintGreen "MuZap hosts section removed (if it existed)."
 
 pause
-goto menu
+goto menu_updates
 
 
-:: RUN TESTS =============================
+:: RUN TESTS ===========================
 :run_tests
 chcp 437 >nul
 cls
 
-:: Require PowerShell 3.0+
 powershell -NoProfile -Command "if ($PSVersionTable -and $PSVersionTable.PSVersion -and $PSVersionTable.PSVersion.Major -ge 3) { exit 0 } else { exit 1 }" >nul 2>&1
 if %errorLevel% neq 0 (
     echo PowerShell 3.0 or newer is required.
     echo Please upgrade PowerShell and rerun this script.
     echo.
     pause
-    goto menu
+    goto menu_tools
 )
 
 echo Starting configuration tests in PowerShell window...
 echo.
 start "" powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0utils\test_muzap.ps1"
 pause
-goto menu
+goto menu_tools
 
 
 :: Utility functions
@@ -1094,10 +1171,8 @@ if "%extracted%"=="0" (
 exit /b 0
 
 
-:: CONFIG (INI) =========================
+:: CONFIG (INI) ========================
 :config_bootstrap
-:: Create config file if missing.
-:: Also migrates old flag files (utils\check_updates.enabled, utils\game_filter.enabled) into ini defaults.
 if exist "%CONFIG_FILE%" exit /b
 
 set "BOOT_CheckUpdates=0"
@@ -1204,7 +1279,6 @@ exit /b
 
 
 :config_set
-:: NOTE: This rewrites muzap.ini using UTF-8 (no BOM)
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "& { param([string]$path,[string]$section,[string]$key,[string]$value) " ^
   "  if (-not $section) { throw 'section is empty' } " ^
