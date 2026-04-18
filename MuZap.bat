@@ -1,5 +1,13 @@
 @echo off
 set "CONFIG_FILE=%~dp0muzap.ini"
+
+:: ANSI color codes (Win10/11 only)
+for /f %%a in ('echo prompt $E^|cmd') do set "ESC=%%a"
+set "GREEN=%ESC%[92m"
+set "RED=%ESC%[91m"
+set "YELLOW=%ESC%[93m"
+set "RESET=%ESC%[0m"
+
 call :config_bootstrap
 call :config_load
 
@@ -82,7 +90,6 @@ goto menu
 :menu_service
 cls
 
-call :config_load
 call :current_strategy_status
 
 set "menu_choice=null"
@@ -113,7 +120,6 @@ goto menu_service
 :menu_settings
 cls
 
-call :config_load
 call :ipset_switch_status
 call :game_switch_status
 
@@ -140,8 +146,6 @@ goto menu_settings
 :: SUBMENU: UPDATES ====================
 :menu_updates
 cls
-
-call :config_load
 
 set "menu_choice=null"
 
@@ -217,7 +221,6 @@ exit /b
 :: STATUS ==============================
 :service_status
 cls
-chcp 437 > nul
 
 sc query "MuZap" >nul 2>&1
 if !errorlevel!==0 (
@@ -270,7 +273,6 @@ exit /b
 :: REMOVE ==============================
 :service_remove
 cls
-chcp 65001 > nul
 
 set SRVCNAME=MuZap
 sc query "!SRVCNAME!" >nul 2>&1
@@ -305,7 +307,6 @@ goto menu_service
 :: RESTART =============================
 :service_restart
 cls
-chcp 437 > nul
 
 sc query "MuZap" >nul 2>&1
 if !errorlevel! neq 0 (
@@ -331,7 +332,6 @@ goto menu_service
 :: INSTALL =============================
 :service_install
 cls
-chcp 437 > nul
 
 call :config_load
 
@@ -354,6 +354,7 @@ echo Pick one of the strategies from strategies.ini:
 set "count=0"
 set "CUR_SEC="
 
+:: Single pass: collect names, descriptions and params together
 for /f "usebackq tokens=1,* delims==" %%A in ("%INI_FILE%") do (
     set "KEY=%%A"
     for /f "tokens=* delims= " %%a in ("!KEY!") do set "KEY=%%a"
@@ -363,8 +364,13 @@ for /f "usebackq tokens=1,* delims==" %%A in ("%INI_FILE%") do (
         set "CUR_SEC=!KEY:~1,-1!"
         set "section!count!=!CUR_SEC!"
         set "desc!count!=No description"
-    ) else if /i "!KEY!"=="Description" (
-        if defined CUR_SEC set "desc!count!=%%B"
+        set "params!count!="
+    ) else if defined CUR_SEC (
+        if /i "!KEY!"=="Description" (
+            set "desc!count!=%%B"
+        ) else if /i "!KEY!"=="Params" (
+            set "params!count!=%%B"
+        )
     )
 )
 
@@ -388,28 +394,7 @@ if not defined selectedSection (
     goto menu_service
 )
 
-:: Find and read the Params for selectedSection
-set "STRATEGY_PARAMS="
-set "READING=0"
-for /f "usebackq tokens=1,* delims==" %%A in ("%INI_FILE%") do (
-    set "KEY=%%A"
-    for /f "tokens=* delims= " %%a in ("!KEY!") do set "KEY=%%a"
-
-    if "!KEY:~0,1!"=="[" (
-        set "CUR_READ_SEC=!KEY:~1,-1!"
-        if /i "!CUR_READ_SEC!"=="!selectedSection!" (
-            set "READING=1"
-        ) else (
-            set "READING=0"
-        )
-    ) else if "!READING!"=="1" (
-        if /i "!KEY!"=="Params" (
-            set "STRATEGY_PARAMS=%%B"
-            set "READING=0"
-        )
-    )
-)
-
+set "STRATEGY_PARAMS=!params%choice%!"
 if not defined STRATEGY_PARAMS (
     call :PrintRed "Failed to parse Params for [!selectedSection!]"
     pause
@@ -463,7 +448,6 @@ goto menu_service
 
 :: SILENT REINSTALL (used by game_switch auto-apply) ===
 :service_reinstall_silent
-chcp 437 > nul
 
 set "REINSTALL_STRATEGY="
 for /f "tokens=2*" %%A in ('reg query "HKLM\System\CurrentControlSet\Services\MuZap" /v MuZap-strategy 2^>nul') do set "REINSTALL_STRATEGY=%%B"
@@ -483,7 +467,7 @@ if not exist "%INI_FILE%" (
     exit /b 1
 )
 
-:: Read params for saved strategy
+:: Single pass: find params for saved strategy
 set "SR_PARAMS="
 set "SR_READING=0"
 for /f "usebackq tokens=1,* delims==" %%A in ("%INI_FILE%") do (
@@ -494,7 +478,7 @@ for /f "usebackq tokens=1,* delims==" %%A in ("%INI_FILE%") do (
         set "SR_SEC=!KEY:~1,-1!"
         if /i "!SR_SEC!"=="!REINSTALL_STRATEGY!" (
             set "SR_READING=1"
-        ) else (
+        ) else if "!SR_READING!"=="1" (
             set "SR_READING=0"
         )
     ) else if "!SR_READING!"=="1" (
@@ -544,7 +528,6 @@ exit /b 0
 
 :: CHECK UPDATES =======================
 :service_check_updates
-chcp 437 > nul
 cls
 
 call :config_load
@@ -624,7 +607,6 @@ goto menu_updates
 
 :: DIAGNOSTICS =========================
 :service_diagnostics
-chcp 437 > nul
 cls
 
 :: Base Filtering Engine
@@ -959,7 +941,6 @@ goto menu_tools
 
 :: GAME SWITCH =========================
 :game_switch_status
-chcp 437 > nul
 
 set "GameFilterStatus=off"
 set "GameFilter=12"
@@ -987,7 +968,6 @@ exit /b
 
 
 :game_switch
-chcp 437 > nul
 cls
 
 echo Select game filter mode:
@@ -1044,7 +1024,6 @@ goto menu_settings
 
 :: IPSET SWITCH ========================
 :ipset_switch_status
-chcp 437 > nul
 
 set "listFile=%~dp0lists\ipset-all.txt"
 set "lineCount=0"
@@ -1070,7 +1049,6 @@ exit /b
 
 
 :ipset_switch
-chcp 437 > nul
 cls
 
 call :ipset_switch_status
@@ -1184,7 +1162,6 @@ goto menu_settings
 
 :: IPSET UPDATE ========================
 :ipset_update
-chcp 437 > nul
 cls
 
 set "listFile=%~dp0lists\ipset-all.txt"
@@ -1229,7 +1206,6 @@ goto menu_updates
 
 :: HOSTS UPDATE ========================
 :hosts_update
-chcp 437 > nul
 cls
 
 set "hostsFile=%SystemRoot%\System32\drivers\etc\hosts"
@@ -1289,7 +1265,6 @@ goto menu_updates
 
 
 :hosts_remove
-chcp 437 > nul
 cls
 
 set "hostsFile=%SystemRoot%\System32\drivers\etc\hosts"
@@ -1318,7 +1293,6 @@ goto menu_updates
 
 :: RUN TESTS ===========================
 :run_tests
-chcp 437 >nul
 cls
 
 powershell -NoProfile -Command "if ($PSVersionTable -and $PSVersionTable.PSVersion -and $PSVersionTable.PSVersion.Major -ge 3) { exit 0 } else { exit 1 }" >nul 2>&1
@@ -1340,15 +1314,15 @@ goto menu_tools
 :: Utility functions
 
 :PrintGreen
-powershell -NoProfile -Command "Write-Host \"%~1\" -ForegroundColor Green"
+echo %GREEN%%~1%RESET%
 exit /b
 
 :PrintRed
-powershell -NoProfile -Command "Write-Host \"%~1\" -ForegroundColor Red"
+echo %RED%%~1%RESET%
 exit /b
 
 :PrintYellow
-powershell -NoProfile -Command "Write-Host \"%~1\" -ForegroundColor Yellow"
+echo %YELLOW%%~1%RESET%
 exit /b
 
 :current_strategy_status
