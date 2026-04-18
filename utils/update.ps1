@@ -37,6 +37,31 @@ function Cleanup {
     if ($tempExtract -and (Test-Path $tempExtract)) { Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
+# Verify downloaded file is a valid ZIP by checking magic bytes (PK\x03\x04)
+# Per ZIP specification (PKWARE APPNOTE), every local file header starts with signature 0x04034b50
+function Test-ZipValid {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) { return $false }
+
+    $item = Get-Item $Path
+    if ($item.Length -lt 4) { return $false }
+
+    try {
+        $bytes = New-Object byte[] 4
+        $stream = [System.IO.File]::OpenRead($Path)
+        try {
+            [void]$stream.Read($bytes, 0, 4)
+        } finally {
+            $stream.Close()
+        }
+        # ZIP local file header signature: 50 4B 03 04
+        return ($bytes[0] -eq 0x50 -and $bytes[1] -eq 0x4B -and $bytes[2] -eq 0x03 -and $bytes[3] -eq 0x04)
+    } catch {
+        return $false
+    }
+}
+
 # Step 1: fetch latest release info from GitHub API
 Write-Info "Fetching latest release info..."
 try {
@@ -84,9 +109,17 @@ if (-not (Test-Path $tempZip) -or (Get-Item $tempZip).Length -eq 0) {
     exit 1
 }
 
-Write-Ok "Download complete."
+# Step 3: verify ZIP integrity before extracting
+Write-Info "Verifying archive integrity..."
+if (-not (Test-ZipValid -Path $tempZip)) {
+    Write-Err "Downloaded file is not a valid ZIP archive (bad magic bytes). The server may have returned an error page."
+    Write-Err "File size: $((Get-Item $tempZip).Length) bytes. Try again later."
+    Cleanup
+    exit 1
+}
+Write-Ok "Archive integrity check passed."
 
-# Step 3: extract zip
+# Step 4: extract zip
 Write-Info "Extracting archive..."
 if (Test-Path $tempExtract) {
     Remove-Item $tempExtract -Recurse -Force
@@ -103,8 +136,7 @@ try {
 
 Write-Ok "Extraction complete."
 
-# Step 4: find root of extracted archive
-# Get-Item.FullName always returns the long path — safe for Substring()
+# Step 5: find root of extracted archive
 $extractedItems = Get-ChildItem -Path $tempExtract
 $extractedRoot  = (Get-Item $tempExtract).FullName
 
@@ -116,7 +148,7 @@ $extractedRootNorm = $extractedRoot.TrimEnd('\') + '\'
 
 Write-Info "Archive root: $extractedRootNorm"
 
-# Step 5: stop MuZap service before replacing files
+# Step 6: stop MuZap service before replacing files
 $serviceWasRunning = $false
 $svc = Get-Service -Name "MuZap" -ErrorAction SilentlyContinue
 if ($svc -and $svc.Status -eq 'Running') {
@@ -137,7 +169,7 @@ if ($winwsProc) {
     $winwsProc | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
-# Step 6: copy files, skipping protected paths
+# Step 7: copy files, skipping protected paths
 # MuZap.bat is copied separately to .service\MuZap.bat.pending
 Write-Info "Applying update files..."
 
@@ -189,7 +221,7 @@ foreach ($file in $allFiles) {
 
 Write-Ok "Files applied."
 
-# Step 7: write new version into muzap.ini via config_set.ps1
+# Step 8: write new version into muzap.ini via config_set.ps1
 Write-Info "Updating version in muzap.ini..."
 try {
     & $configSetScript -Path $configFile -Section "App" -Key "Version" -Value $newVersion
@@ -198,7 +230,7 @@ try {
     Write-Warn "Could not update version in muzap.ini: $_"
 }
 
-# Step 8: restart MuZap service if it was running before
+# Step 9: restart MuZap service if it was running before
 if ($serviceWasRunning) {
     Write-Info "Restarting MuZap service..."
     try {
