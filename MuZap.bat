@@ -60,8 +60,8 @@ echo.
 echo           MUZAP SERVICE MANAGER v!LOCAL_VERSION!
 echo ================================================
 echo.
-echo   1.  Service      ^| Strategy: !CurrentStrategy!
-echo   2.  Settings     ^| Game: !GameFilterStatus! / IPSet: !IPsetStatus!
+echo   1.  Service      ^| Strategy: [!CurrentStrategy!]
+echo   2.  Settings     ^| Game: [!GameFilterStatus!] / IPSet: [!IPsetStatus!]
 echo   3.  Updates
 echo   4.  Tools
 echo ------------------------------------------------
