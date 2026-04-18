@@ -1,0 +1,147 @@
+name: Code Linter (PowerShell + Batch) [non-blocking]
+
+on:
+  push:
+    paths:
+      - '**/*.ps1'
+      - '**/*.psm1'
+      - '**/*.psd1'
+      - '**/*.bat'
+      - '**/*.cmd'
+      - '.github/workflows/code_linter.yml'
+  pull_request:
+    paths:
+      - '**/*.ps1'
+      - '**/*.psm1'
+      - '**/*.psd1'
+      - '**/*.bat'
+      - '**/*.cmd'
+      - '.github/workflows/code_linter.yml'
+
+jobs:
+  lint:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ----------------------------
+      # PowerShell: PSScriptAnalyzer
+      # ----------------------------
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+
+      - name: Run PSScriptAnalyzer (annotations, non-blocking)
+        shell: pwsh
+        run: |
+          function Escape-GHA([string]$s) {
+            if ($null -eq $s) { return "" }
+            $s = $s -replace '%','%25'
+            $s = $s -replace "`r",'%0D'
+            $s = $s -replace "`n",'%0A'
+            return $s
+          }
+
+          $psFiles = git ls-files '*.ps1' '*.psm1' '*.psd1'
+          if (-not $psFiles) {
+            Write-Host "No PowerShell files found."
+            exit 0
+          }
+
+          # Если у тебя есть проектный конфиг:
+          # $settings = Join-Path $PWD 'PSScriptAnalyzerSettings.psd1'
+          # $results = Invoke-ScriptAnalyzer -Path $psFiles -Settings $settings -Severity @('Error','Warning')
+
+          $results = Invoke-ScriptAnalyzer -Path $psFiles -Severity @('Error','Warning')
+          $results = @($results)
+
+          foreach ($r in $results) {
+            $sev = [string]$r.Severity
+            $cmd = if ($sev -eq 'Error') { 'error' } else { 'warning' }
+
+            $file = $r.ScriptName
+            if (-not $file) { $file = $r.ScriptPath }
+            $file = Escape-GHA $file
+
+            $line = $r.Line
+            if (-not $line) { $line = 1 }
+
+            $title = Escape-GHA ("PSScriptAnalyzer " + $r.RuleName)
+            $msg   = Escape-GHA $r.Message
+
+            Write-Host "::${cmd} file=${file},line=${line},title=${title}::${msg}"
+          }
+
+          Write-Host "PSScriptAnalyzer: $($results.Count) findings (Errors+Warnings)."
+          exit 0
+
+      # ----------------------------
+      # Batch: Blinter
+      # ----------------------------
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Blinter
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-cache-dir Blinter
+
+      - name: Run Blinter (annotations, non-blocking)
+        shell: pwsh
+        run: |
+          $code = @'
+          import subprocess
+          import sys
+
+          import blinter
+
+          def esc(s: str) -> str:
+            if s is None:
+              return ""
+            return (s.replace("%", "%25")
+                     .replace("\r", "%0D")
+                     .replace("\n", "%0A"))
+
+          files = subprocess.check_output(
+              ["git", "ls-files", "*.bat", "*.cmd"],
+              text=True
+          ).splitlines()
+
+          if not files:
+              print("No batch files found.")
+              sys.exit(0)
+
+          total = 0
+          for f in files:
+              try:
+                  issues = blinter.lint_batch_file(f)
+              except Exception as e:
+                  msg = esc(f"Blinter exception: {e}")
+                  print(f"::warning file={esc(f)},line=1,title=Blinter:::{msg}")
+                  continue
+
+              for issue in issues:
+                  total += 1
+                  sev = issue.rule.severity.value  # 'Error' / 'Warning' / etc.
+                  cmd = "error" if sev == "Error" else "warning"
+
+                  title = esc(f"Blinter {issue.rule.code}: {issue.rule.name}")
+                  # explanation обычно информативнее, recommendation можно доп. строкой в конце
+                  msg = issue.rule.explanation or issue.rule.recommendation or issue.rule.name
+                  msg = esc(msg)
+
+                  line = getattr(issue, "line_number", None) or 1
+                  print(f"::{cmd} file={esc(f)},line={line},title={title}::{msg}")
+
+          print(f"Blinter: {total} findings.")
+          sys.exit(0)
+          '@
+
+          python -c $code
