@@ -1255,12 +1255,16 @@ if /i "%BOOT_GameFilterMode%"=="all" (
     echo ; Values:
     echo ;   CheckUpdates: 0 or 1
     echo ;   GameFilterMode: off ^| all ^| tcp ^| udp
-    echo.
+    echo ;
     echo ; Hosts backup:
-    echo ;   BackupMode: off ^| once ^| single ^| timestamp
+    echo ;   BackupMode:
+    echo ;     off       - no backups
+    echo ;     once      - create only one "original" backup and never create more
+    echo ;     single    - keep one rolling backup (overwrite each time^)
+    echo ;     timestamp - create a timestamped backup each time ^(not recommended^)
     echo.
     echo [App]
-    echo Version=1.0.3
+    echo Version=unknown
     echo.
     echo [Features]
     echo CheckUpdates=%BOOT_CheckUpdates%
@@ -1268,6 +1272,7 @@ if /i "%BOOT_GameFilterMode%"=="all" (
     echo.
     echo [Hosts]
     echo BackupMode=once
+    echo.
 )>"%CONFIG_FILE%"
 
 exit /b
