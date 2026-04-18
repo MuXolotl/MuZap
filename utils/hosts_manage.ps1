@@ -13,17 +13,23 @@ param(
     [string]$MarkerName = "MuZap",
 
     [Parameter(Mandatory = $false)]
-    [ValidateSet("off","once","single","timestamp")]
     [string]$BackupMode = "once"
 )
 
 $ErrorActionPreference = "Stop"
 
+# Normalize BackupMode: if empty or invalid value - fall back to "once"
+$validModes = @("off", "once", "single", "timestamp")
+if ([string]::IsNullOrWhiteSpace($BackupMode) -or ($validModes -notcontains $BackupMode.ToLower())) {
+    Write-Host "[WARN] Invalid or empty BackupMode '$BackupMode', defaulting to 'once'." -ForegroundColor Yellow
+    $BackupMode = "once"
+}
+$BackupMode = $BackupMode.ToLower()
+
 function Get-FileEncoding {
     param([string]$Path)
 
     if (-not (Test-Path -LiteralPath $Path)) {
-        # If file does not exist, default to system ANSI (classic hosts style)
         return [System.Text.Encoding]::Default
     }
 
@@ -44,7 +50,6 @@ function Get-FileEncoding {
         return [System.Text.Encoding]::BigEndianUnicode
     }
 
-    # No BOM -> assume system default encoding
     return [System.Text.Encoding]::Default
 }
 
@@ -140,10 +145,7 @@ if ($Action -eq "Remove") {
 $srcEnc = Get-FileEncoding -Path $SourceFile
 $srcLines = Read-AllLinesSafe -Path $SourceFile -Encoding $srcEnc
 
-# Normalize source lines:
-# - keep empty lines
-# - ignore comment-only lines
-# - trim line end spaces
+# Normalize source lines: keep empty lines, skip comment-only lines, trim trailing spaces
 $normalized = New-Object System.Collections.Generic.List[string]
 foreach ($l in $srcLines) {
     $line = $l.TrimEnd()
@@ -152,7 +154,7 @@ foreach ($l in $srcLines) {
     $normalized.Add($line)
 }
 
-# Ensure at least one empty line before our section (if file has content and doesn't already end with empty)
+# Ensure at least one empty line before our section
 if ($clean.Count -gt 0) {
     $last = $clean[$clean.Count - 1]
     if ($last -ne $null -and $last.Trim() -ne "") {

@@ -19,7 +19,7 @@ if "%~1"=="check_updates" (
     if "%CFG_CheckUpdates%"=="0" exit /b
 
     if not "%~2"=="soft" (
-        start /b MuZap check_updates soft
+        start /b "" "%~f0" check_updates soft
     ) else (
         call :service_check_updates soft
     )
@@ -155,6 +155,8 @@ goto menu_settings
 :: SUBMENU: UPDATES ====================
 :menu_updates
 cls
+
+call :config_load
 
 set "menu_choice=null"
 
@@ -346,6 +348,8 @@ goto menu_service
 cls
 chcp 437 > nul
 
+call :config_load
+
 :: Main
 cd /d "%~dp0"
 set "BIN_PATH=%~dp0bin\"
@@ -470,6 +474,87 @@ sc start %SRVCNAME%
 
 pause
 goto menu_service
+
+
+:: SILENT REINSTALL (used by game_switch auto-apply) ===
+:service_reinstall_silent
+chcp 437 > nul
+
+set "REINSTALL_STRATEGY="
+for /f "tokens=2*" %%A in ('reg query "HKLM\System\CurrentControlSet\Services\MuZap" /v MuZap-strategy 2^>nul') do set "REINSTALL_STRATEGY=%%B"
+
+if not defined REINSTALL_STRATEGY (
+    call :PrintYellow "Cannot auto-apply: service not installed or strategy not saved in registry."
+    call :PrintYellow "Please reinstall the strategy manually from the Service menu."
+    exit /b 1
+)
+
+set "BIN_PATH=%~dp0bin\"
+set "LISTS_PATH=%~dp0lists\"
+set "INI_FILE=%~dp0strategies.ini"
+
+if not exist "%INI_FILE%" (
+    call :PrintRed "strategies.ini not found. Cannot auto-reinstall."
+    exit /b 1
+)
+
+:: Read params for saved strategy
+set "SR_PARAMS="
+set "SR_READING=0"
+for /f "usebackq tokens=1,* delims==" %%A in ("%INI_FILE%") do (
+    set "KEY=%%A"
+    for /f "tokens=* delims= " %%a in ("!KEY!") do set "KEY=%%a"
+
+    if "!KEY:~0,1!"=="[" (
+        set "SR_SEC=!KEY:~1,-1!"
+        if /i "!SR_SEC!"=="!REINSTALL_STRATEGY!" (
+            set "SR_READING=1"
+        ) else (
+            set "SR_READING=0"
+        )
+    ) else if "!SR_READING!"=="1" (
+        if /i "!KEY!"=="Params" (
+            set "SR_PARAMS=%%B"
+            set "SR_READING=0"
+        )
+    )
+)
+
+if not defined SR_PARAMS (
+    call :PrintRed "Could not find params for strategy [!REINSTALL_STRATEGY!] in strategies.ini."
+    exit /b 1
+)
+
+:: Substitute
+set "SR_ARGS=!SR_PARAMS:%%BIN%%=%BIN_PATH%!"
+set "SR_ARGS=!SR_ARGS:%%LISTS%%=%LISTS_PATH%!"
+set "SR_ARGS=!SR_ARGS:%%GameFilterTCP%%=%GameFilterTCP%!"
+set "SR_ARGS=!SR_ARGS:%%GameFilterUDP%%=%GameFilterUDP%!"
+
+call :tcp_enable
+
+net stop MuZap >nul 2>&1
+sc delete MuZap >nul 2>&1
+
+sc create MuZap binPath= "\"%BIN_PATH%winws.exe\"" DisplayName= "MuZap" start= auto >nul 2>&1
+sc description MuZap "MuZap DPI bypass software" >nul 2>&1
+
+setlocal disabledelayedexpansion
+set "SR_ESCAPED=%SR_ARGS:EXCL_MARK=^!%"
+set "SR_ESCAPED=%SR_ESCAPED:"=\"%"
+reg add "HKLM\System\CurrentControlSet\Services\MuZap" /v ImagePath /t REG_EXPAND_SZ /d "\"%BIN_PATH%winws.exe\" %SR_ESCAPED%" /f >nul 2>&1
+endlocal & set "REINSTALL_STRATEGY_=%REINSTALL_STRATEGY%"
+
+reg add "HKLM\System\CurrentControlSet\Services\MuZap" /v MuZap-strategy /t REG_SZ /d "%REINSTALL_STRATEGY_%" /f >nul 2>&1
+
+sc start MuZap >nul 2>&1
+if !errorlevel!==0 (
+    call :PrintGreen "Service MuZap reinstalled and started with new settings [!REINSTALL_STRATEGY_!]."
+) else (
+    call :PrintRed "Service reinstalled but failed to start. Check the strategy manually."
+)
+
+exit /b 0
 
 
 :: CHECK UPDATES =======================
@@ -948,7 +1033,30 @@ if "%GameFilterChoice%"=="0" (
     goto menu_settings
 )
 
-call :PrintYellow "Restart MuZap to apply the changes"
+:: Reload config and game filter vars with new value
+call :config_load
+call :game_switch_status
+
+:: Check if service is installed and offer auto-reinstall
+sc query "MuZap" >nul 2>&1
+if !errorlevel!==0 (
+    echo.
+    call :PrintYellow "Game Filter changed. Service must be reinstalled to apply new port settings."
+    set "APPLY_CHOICE=Y"
+    set /p "APPLY_CHOICE=Reinstall service now with new Game Filter? (Y/N, default: Y): "
+    if "!APPLY_CHOICE!"=="" set "APPLY_CHOICE=Y"
+    if /i "!APPLY_CHOICE!"=="y" set "APPLY_CHOICE=Y"
+
+    if /i "!APPLY_CHOICE!"=="Y" (
+        echo.
+        call :service_reinstall_silent
+    ) else (
+        call :PrintYellow "Skipped. Reinstall the strategy manually from the Service menu to apply changes."
+    )
+) else (
+    call :PrintYellow "Game Filter changed. Install a strategy from the Service menu to apply."
+)
+
 pause
 goto menu_settings
 
@@ -984,41 +1092,109 @@ exit /b
 chcp 437 > nul
 cls
 
+call :ipset_switch_status
+
 set "listFile=%~dp0lists\ipset-all.txt"
 set "backupFile=%listFile%.backup"
 
-if "%IPsetStatus%"=="loaded" (
-    echo Switching to none mode...
+echo Current IPSet mode: [!IPsetStatus!]
+echo.
+echo Select new IPSet mode:
+echo   1. none   - placeholder IP only (bypass for all IPs disabled)
+echo   2. any    - all IPs pass through the filter
+echo   3. loaded - use ipset-all.txt list
+echo ------------------------------------------------
+echo   0. Back
+echo.
+set "IPSET_CHOICE="
+set /p "IPSET_CHOICE=Select (0-3): "
 
-    if not exist "%backupFile%" (
-        ren "%listFile%" "ipset-all.txt.backup"
-    ) else (
-        del /f /q "%backupFile%"
-        ren "%listFile%" "ipset-all.txt.backup"
-    )
+if "!IPSET_CHOICE!"=="0" goto menu_settings
 
-    >"%listFile%" (
-        echo 203.0.113.113/32
-    )
-
-) else if "%IPsetStatus%"=="none" (
-    echo Switching to any mode...
-
-    >"%listFile%" (
-        rem Creating empty file
-    )
-
-) else if "%IPsetStatus%"=="any" (
-    echo Switching to loaded mode...
-
-    if exist "%backupFile%" (
-        del /f /q "%listFile%"
-        ren "%backupFile%" "ipset-all.txt"
-    ) else (
-        echo Error: no backup to restore. Update list from service menu first
+if "!IPSET_CHOICE!"=="1" (
+    :: Switch to none
+    if "!IPsetStatus!"=="none" (
+        call :PrintYellow "Already in 'none' mode."
         pause
         goto menu_settings
     )
+    if "!IPsetStatus!"=="loaded" (
+        if not exist "%backupFile%" (
+            ren "%listFile%" "ipset-all.txt.backup"
+        ) else (
+            del /f /q "%backupFile%"
+            ren "%listFile%" "ipset-all.txt.backup"
+        )
+    )
+    >"%listFile%" echo 203.0.113.113/32
+    call :PrintGreen "IPSet mode set to: none"
+
+) else if "!IPSET_CHOICE!"=="2" (
+    :: Switch to any
+    if "!IPsetStatus!"=="any" (
+        call :PrintYellow "Already in 'any' mode."
+        pause
+        goto menu_settings
+    )
+    if "!IPsetStatus!"=="loaded" (
+        if not exist "%backupFile%" (
+            ren "%listFile%" "ipset-all.txt.backup"
+        ) else (
+            del /f /q "%backupFile%"
+            ren "%listFile%" "ipset-all.txt.backup"
+        )
+    ) else if "!IPsetStatus!"=="none" (
+        del /f /q "%listFile%" >nul 2>&1
+    )
+    type nul >"%listFile%"
+    call :PrintGreen "IPSet mode set to: any"
+
+) else if "!IPSET_CHOICE!"=="3" (
+    :: Switch to loaded
+    if "!IPsetStatus!"=="loaded" (
+        call :PrintYellow "Already in 'loaded' mode."
+        pause
+        goto menu_settings
+    )
+    if exist "%backupFile%" (
+        if exist "%listFile%" del /f /q "%listFile%"
+        ren "%backupFile%" "ipset-all.txt"
+        call :PrintGreen "IPSet mode set to: loaded (restored from backup)"
+    ) else (
+        call :PrintRed "No backup found. Update the IPSet list first from the Updates menu."
+        pause
+        goto menu_settings
+    )
+
+) else (
+    call :PrintYellow "Invalid choice."
+    pause
+    goto menu_settings
+)
+
+:: Offer to restart service to apply new ipset
+echo.
+sc query "MuZap" >nul 2>&1
+if !errorlevel!==0 (
+    call :PrintYellow "IPSet changed. Service restart required to apply."
+    set "RS_CHOICE=Y"
+    set /p "RS_CHOICE=Restart service now? (Y/N, default: Y): "
+    if "!RS_CHOICE!"=="" set "RS_CHOICE=Y"
+    if /i "!RS_CHOICE!"=="y" set "RS_CHOICE=Y"
+
+    if /i "!RS_CHOICE!"=="Y" (
+        net stop MuZap >nul 2>&1
+        net start MuZap >nul 2>&1
+        if !errorlevel!==0 (
+            call :PrintGreen "Service MuZap restarted successfully."
+        ) else (
+            call :PrintRed "Failed to restart MuZap service."
+        )
+    ) else (
+        call :PrintYellow "Skipped. Restart the service manually to apply changes."
+    )
+) else (
+    call :PrintYellow "Service not installed. Start a strategy from the Service menu to apply."
 )
 
 pause
@@ -1038,6 +1214,8 @@ echo Updating ipset-all...
 
 where curl.exe >nul 2>&1
 if !errorlevel!==0 (
+    curl -L -f -m 15 -o "%tempFile%" "%url%"
+) else (
     powershell -NoProfile -Command ^
         "$url = '%url%';" ^
         "$out = '%tempFile%';" ^
@@ -1045,8 +1223,6 @@ if !errorlevel!==0 (
         "if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null };" ^
         "$res = Invoke-WebRequest -Uri $url -TimeoutSec 10 -UseBasicParsing;" ^
         "if ($res.StatusCode -eq 200) { $res.Content | Out-File -FilePath $out -Encoding UTF8 } else { exit 1 }"
-) else (
-    curl -L -f -m 15 -o "%tempFile%" "%url%"
 )
 
 if not exist "%tempFile%" (
@@ -1090,13 +1266,13 @@ echo Downloading hosts entries...
 
 where curl.exe >nul 2>&1
 if !errorlevel!==0 (
+    curl -L -f -m 15 -o "%tempFile%" "%hostsUrl%"
+) else (
     powershell -NoProfile -Command ^
         "$url = '%hostsUrl%';" ^
         "$out = '%tempFile%';" ^
         "$res = Invoke-WebRequest -Uri $url -TimeoutSec 10 -UseBasicParsing;" ^
         "if ($res.StatusCode -eq 200) { $res.Content | Out-File -FilePath $out -Encoding UTF8 } else { exit 1 }"
-) else (
-    curl -L -f -m 15 -o "%tempFile%" "%hostsUrl%"
 )
 
 if not exist "%tempFile%" (
