@@ -35,11 +35,11 @@ jobs:
           Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
           Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -AllowClobber
 
-      - name: Run PSScriptAnalyzer (ALL output, grouped by file, non-blocking)
+      - name: Run PSScriptAnalyzer (ALL messages, grouped by file, non-blocking)
         shell: pwsh
         continue-on-error: true
         run: |
-          function Safe-WriteLine([string]$line) {
+          function Safe-WriteMessage([string]$line) {
             if ($null -eq $line) { return }
             if ($line.StartsWith("::")) { $line = " " + $line }
             Write-Host $line
@@ -47,57 +47,44 @@ jobs:
 
           $psFiles = @(git ls-files '*.ps1' '*.psm1' '*.psd1')
           if (-not $psFiles -or $psFiles.Count -eq 0) {
-            Safe-WriteLine "No PowerShell files found."
+            Write-Host "No PowerShell files found."
             exit 0
           }
 
           $total = 0
 
           foreach ($f in $psFiles) {
-            Safe-WriteLine "::group::PSScriptAnalyzer: $f"
+            Write-Host "::group::PSScriptAnalyzer: $f"
 
             try {
-              # ВАЖНО: без -Severity => не фильтруем, выводим всё что отдаёт analyzer
               $res = @(Invoke-ScriptAnalyzer -Path $f -ErrorAction Continue)
             }
             catch {
-              Safe-WriteLine "PSScriptAnalyzer crashed for file: $f"
-              Safe-WriteLine ($_.Exception | Out-String)
-              Safe-WriteLine "::endgroup::"
+              Safe-WriteMessage "PSScriptAnalyzer crashed for file."
+              Safe-WriteMessage ($_.Exception.Message)
+              Write-Host "::endgroup::"
               continue
             }
 
             if (-not $res -or $res.Count -eq 0) {
-              Safe-WriteLine "OK (no findings)"
-              Safe-WriteLine "::endgroup::"
+              Write-Host "OK (no findings)"
+              Write-Host "::endgroup::"
               continue
             }
 
             foreach ($r in $res) {
               $total++
-
-              $sev  = [string]$r.Severity
-              $rule = [string]$r.RuleName
-              $line = $r.Line; if (-not $line) { $line = 1 }
-
-              $col = $null
-              if ($r.PSObject.Properties.Name -contains 'Column') { $col = $r.Column }
-              if (-not $col -and ($r.PSObject.Properties.Name -contains 'StartColumnNumber')) { $col = $r.StartColumnNumber }
-              if (-not $col) { $col = 1 }
-
+              $sev = [string]$r.Severity
               $msg = [string]$r.Message
 
-              Safe-WriteLine ("[{0}] {1} L{2} C{3}: {4}" -f $sev, $rule, $line, $col, $msg)
-
-              Safe-WriteLine "---- RAW RECORD (Format-List *) ----"
-              ($r | Format-List * | Out-String).TrimEnd("`r","`n") -split "`r?`n" | ForEach-Object { Safe-WriteLine $_ }
-              Safe-WriteLine "------------------------------------"
+              # Safe-WriteMessage $msg
+              Safe-WriteMessage ("[{0}] {1}" -f $sev, $msg)
             }
 
-            Safe-WriteLine "::endgroup::"
+            Write-Host "::endgroup::"
           }
 
-          Safe-WriteLine "PSScriptAnalyzer total findings: $total"
+          Write-Host "PSScriptAnalyzer total findings: $total"
           exit 0
 
       # ----------------------------
@@ -114,33 +101,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install --no-cache-dir Blinter
 
-      - name: Run Blinter (ALL output, grouped by file, non-blocking)
+      - name: Run Blinter (ALL messages, grouped by file, non-blocking)
         shell: pwsh
         continue-on-error: true
         run: |
           $code = @'
           import subprocess
           import sys
-
           import blinter
 
-          def safe_print(s: str):
+          def safe_msg(s: str) -> str:
               if s is None:
-                  return
+                  return ""
               if s.startswith("::"):
-                  s = " " + s
-              print(s)
-
-          def dump_obj(obj, title="RAW OBJECT"):
-              safe_print(f"---- {title} ----")
-              try:
-                  d = vars(obj)
-                  for k in sorted(d.keys()):
-                      safe_print(f"{k}: {d[k]!r}")
-              except Exception as e:
-                  safe_print(f"(vars() not available: {e})")
-                  safe_print(repr(obj))
-              safe_print("------------------")
+                  return " " + s
+              return s
 
           files = subprocess.check_output(
               ["git", "ls-files", "*.bat", "*.cmd"],
@@ -148,48 +123,42 @@ jobs:
           ).splitlines()
 
           if not files:
-              safe_print("No batch files found.")
+              print("No batch files found.")
               sys.exit(0)
 
           total = 0
 
           for f in files:
-              safe_print(f"::group::Blinter: {f}")
+              print(f"::group::Blinter: {f}")
               try:
                   issues = blinter.lint_batch_file(f)
               except Exception as e:
-                  safe_print(f"Blinter crashed for file: {f}")
-                  safe_print(str(e))
-                  safe_print("::endgroup::")
+                  print(safe_msg("Blinter crashed for file."))
+                  print(safe_msg(str(e)))
+                  print("::endgroup::")
                   continue
 
               if not issues:
-                  safe_print("OK (no findings)")
-                  safe_print("::endgroup::")
+                  print("OK (no findings)")
+                  print("::endgroup::")
                   continue
 
               for issue in issues:
                   total += 1
-                  sev = issue.rule.severity.value
-                  code = issue.rule.code
-                  name = issue.rule.name
-                  line = getattr(issue, "line_number", None) or 1
+                  sev = issue.rule.severity.value  # 'Error'/'Warning'/...
 
-                  explanation = issue.rule.explanation or ""
-                  recommendation = issue.rule.recommendation or ""
+                  text = issue.rule.explanation or issue.rule.name or "Issue"
+                  rec  = issue.rule.recommendation or ""
 
-                  safe_print(f"[{sev}] {code} L{line}: {name}")
-                  if explanation:
-                      safe_print(f"  Explanation: {explanation}")
-                  if recommendation:
-                      safe_print(f"  Recommendation: {recommendation}")
+                  # print(safe_msg(text))
+                  print(safe_msg(f"[{sev}] {text}"))
 
-                  dump_obj(issue, title="RAW ISSUE (vars(issue))")
-                  dump_obj(issue.rule, title="RAW RULE (vars(issue.rule))")
+                  if rec:
+                      print(safe_msg(f"  {rec}"))
 
-              safe_print("::endgroup::")
+              print("::endgroup::")
 
-          safe_print(f"Blinter total findings: {total}")
+          print(f"Blinter total findings: {total}")
           sys.exit(0)
           '@
 
