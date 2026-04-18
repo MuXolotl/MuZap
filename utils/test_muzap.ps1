@@ -759,8 +759,6 @@ while ($true) {
         }
     }
 
-    $env:NO_UPDATE_CHECK = "1"
-
     # Take snapshot immediately before tests start (not before menu selection)
     $originalWinws = Get-WinwsSnapshot
 

@@ -12,21 +12,6 @@ if "%~1"=="status_zapret" (
     exit /b
 )
 
-if "%~1"=="check_updates" (
-    if defined NO_UPDATE_CHECK exit /b
-
-    call :config_load
-    if "%CFG_CheckUpdates%"=="0" exit /b
-
-    if not "%~2"=="soft" (
-        start /b "" "%~f0" check_updates soft
-    ) else (
-        call :service_check_updates soft
-    )
-
-    exit /b
-)
-
 if "%~1"=="load_game_filter" (
     call :config_load
     call :game_switch_status
@@ -573,14 +558,12 @@ for /f "delims=" %%A in ('powershell -NoProfile -Command ^
 
 if not defined GITHUB_VERSION (
     call :PrintRed "Warning: failed to fetch the latest version. Check your internet connection."
-    if "%~1"=="soft" exit /b
     pause
     goto menu_updates
 )
 
 if "!LOCAL_VERSION!"=="!GITHUB_VERSION!" (
     call :PrintGreen "Latest version is already installed: !LOCAL_VERSION!"
-    if "%~1"=="soft" exit /b
     pause
     goto menu_updates
 )
@@ -588,8 +571,6 @@ if "!LOCAL_VERSION!"=="!GITHUB_VERSION!" (
 echo New version available: !GITHUB_VERSION! (current: !LOCAL_VERSION!)
 echo Release page: %GITHUB_RELEASE_BASE_URL%!GITHUB_VERSION!
 echo.
-
-if "%~1"=="soft" exit /b
 
 set "UPDATE_CHOICE="
 set /p "UPDATE_CHOICE=Do you want to update now? (Y/N, default: Y): "
@@ -1404,7 +1385,6 @@ exit /b 0
 :config_bootstrap
 if exist "%CONFIG_FILE%" exit /b
 
-set "BOOT_CheckUpdates=1"
 set "BOOT_GameFilterMode=off"
 
 if exist "%~dp0utils\game_filter.enabled" (
@@ -1429,7 +1409,6 @@ if /i "%BOOT_GameFilterMode%"=="all" (
 (
     echo ; MuZap configuration file
     echo ; Values:
-    echo ;   CheckUpdates: 0 or 1
     echo ;   GameFilterMode: off ^| all ^| tcp ^| udp
     echo ;
     echo ; Hosts backup:
@@ -1443,7 +1422,6 @@ if /i "%BOOT_GameFilterMode%"=="all" (
     echo Version=unknown
     echo.
     echo [Features]
-    echo CheckUpdates=%BOOT_CheckUpdates%
     echo GameFilterMode=%BOOT_GameFilterMode%
     echo.
     echo [Hosts]
@@ -1458,14 +1436,12 @@ exit /b
 setlocal EnableDelayedExpansion
 
 set "CFG_Version=unknown"
-set "CFG_CheckUpdates=1"
 set "CFG_GameFilterMode=off"
 set "CFG_HostsBackupMode=once"
 
 if not exist "%CONFIG_FILE%" (
     endlocal & (
         set "CFG_Version=unknown"
-        set "CFG_CheckUpdates=1"
         set "CFG_GameFilterMode=off"
         set "CFG_HostsBackupMode=once"
     )
@@ -1497,7 +1473,6 @@ for /f "usebackq delims=" %%L in ("%CONFIG_FILE%") do (
                 if /i "!k!"=="Version" set "CFG_Version=!v!"
             )
             if /i "!section!"=="Features" (
-                if /i "!k!"=="CheckUpdates" set "CFG_CheckUpdates=!v!"
                 if /i "!k!"=="GameFilterMode" set "CFG_GameFilterMode=!v!"
             )
             if /i "!section!"=="Hosts" (
@@ -1507,13 +1482,11 @@ for /f "usebackq delims=" %%L in ("%CONFIG_FILE%") do (
     )
 )
 
-if /i "!CFG_CheckUpdates!" NEQ "0" if /i "!CFG_CheckUpdates!" NEQ "1" set "CFG_CheckUpdates=1"
 if /i "!CFG_GameFilterMode!" NEQ "off" if /i "!CFG_GameFilterMode!" NEQ "all" if /i "!CFG_GameFilterMode!" NEQ "tcp" if /i "!CFG_GameFilterMode!" NEQ "udp" set "CFG_GameFilterMode=off"
 if /i "!CFG_HostsBackupMode!" NEQ "off" if /i "!CFG_HostsBackupMode!" NEQ "once" if /i "!CFG_HostsBackupMode!" NEQ "single" if /i "!CFG_HostsBackupMode!" NEQ "timestamp" set "CFG_HostsBackupMode=once"
 
 endlocal & (
     set "CFG_Version=%CFG_Version%"
-    set "CFG_CheckUpdates=%CFG_CheckUpdates%"
     set "CFG_GameFilterMode=%CFG_GameFilterMode%"
     set "CFG_HostsBackupMode=%CFG_HostsBackupMode%"
 )
