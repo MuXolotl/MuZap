@@ -46,20 +46,27 @@ jobs:
             return $s
           }
 
-          $psFiles = git ls-files '*.ps1' '*.psm1' '*.psd1'
-          if (-not $psFiles) {
+          $psFiles = @(git ls-files '*.ps1' '*.psm1' '*.psd1')
+          if (-not $psFiles -or $psFiles.Count -eq 0) {
             Write-Host "No PowerShell files found."
             exit 0
           }
 
-          # Если у тебя есть проектный конфиг:
-          # $settings = Join-Path $PWD 'PSScriptAnalyzerSettings.psd1'
-          # $results = Invoke-ScriptAnalyzer -Path $psFiles -Settings $settings -Severity @('Error','Warning')
+          $results = @()
 
-          $results = Invoke-ScriptAnalyzer -Path $psFiles -Severity @('Error','Warning')
-          $results = @($results)
+          foreach ($f in $psFiles) {
+            try {
+              # -ErrorAction Continue чтобы не стопориться на единичных проблемах чтения/пути
+              $results += @(Invoke-ScriptAnalyzer -Path $f -Severity @('Error','Warning') -ErrorAction Continue)
+            }
+            catch {
+              $file = Escape-GHA $f
+              $msg  = Escape-GHA $_.Exception.Message
+              Write-Host "::warning file=${file},line=1,title=PSScriptAnalyzer::${msg}"
+            }
+          }
 
-          foreach ($r in $results) {
+          foreach ($r in @($results)) {
             $sev = [string]$r.Severity
             $cmd = if ($sev -eq 'Error') { 'error' } else { 'warning' }
 
@@ -76,7 +83,7 @@ jobs:
             Write-Host "::${cmd} file=${file},line=${line},title=${title}::${msg}"
           }
 
-          Write-Host "PSScriptAnalyzer: $($results.Count) findings (Errors+Warnings)."
+          Write-Host "PSScriptAnalyzer: $(@($results).Count) findings (Errors+Warnings)."
           exit 0
 
       # ----------------------------
