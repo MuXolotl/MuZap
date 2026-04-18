@@ -240,7 +240,7 @@ function Invoke-DpiSuite {
         $runspaces += [PSCustomObject]@{
             Powershell = $powershell
             Handle     = $powershell.BeginInvoke()
-            TargetId   = $target.Id
+            Target     = $target
         }
     }
 
@@ -252,7 +252,7 @@ function Invoke-DpiSuite {
             if ($handle -and $handle.AsyncWaitHandle) {
                 $completed = $handle.AsyncWaitHandle.WaitOne($waitMs)
                 if (-not $completed) {
-                    Write-Host "[WARN] Runspace for [$($rs.TargetId)] timed out after $waitMs ms; stopping runspace..." -ForegroundColor Yellow
+                    Write-Host "[WARN] Runspace for [$($rs.Target.Id)] timed out after $waitMs ms; stopping runspace..." -ForegroundColor Yellow
                     try { $rs.Powershell.Stop() } catch {}
                 }
             }
@@ -277,17 +277,19 @@ function Invoke-DpiSuite {
                 Write-Host "  No 16-20KB freeze pattern for this target." -ForegroundColor Green
             }
         } catch {
-            Write-Host "[WARN] EndInvoke failed for a runspace; treating as failure." -ForegroundColor Yellow
-            $failedLine = [PSCustomObject]@{
-                TestLabel = 'RUNSPACE'
-                Code      = 'ERR'
-                SizeBytes = 0
-                SizeKB    = 0
-                Status    = 'FAIL'
-                Color     = 'Red'
-                Warned    = $false
+            Write-Host "[WARN] EndInvoke failed for [$($rs.Target.Id)]; treating as failure." -ForegroundColor Yellow
+            $failedLines = @(
+                [PSCustomObject]@{ TestLabel = 'HTTP';   Code = 'ERR'; UpBytes = 0; UpKB = 0; DownBytes = 0; DownKB = 0; Time = -1; Status = 'FAIL'; Color = 'Red'; Warned = $false },
+                [PSCustomObject]@{ TestLabel = 'TLS1.2'; Code = 'ERR'; UpBytes = 0; UpKB = 0; DownBytes = 0; DownKB = 0; Time = -1; Status = 'FAIL'; Color = 'Red'; Warned = $false },
+                [PSCustomObject]@{ TestLabel = 'TLS1.3'; Code = 'ERR'; UpBytes = 0; UpKB = 0; DownBytes = 0; DownKB = 0; Time = -1; Status = 'FAIL'; Color = 'Red'; Warned = $false }
+            )
+            $results += [PSCustomObject]@{
+                TargetId = $rs.Target.Id
+                Provider = $rs.Target.Provider
+                Country  = $rs.Target.Country
+                Lines    = $failedLines
+                Warned   = $false
             }
-            $results += [PSCustomObject]@{ TargetId = 'UNKNOWN'; Provider = 'UNKNOWN'; Lines = @($failedLine); Warned = $false }
         }
         $rs.Powershell.Dispose()
     }
@@ -377,13 +379,11 @@ function Write-SummaryTable {
     $totalWidth = ($colWidths | Measure-Object -Sum).Sum
     $separator  = "-" * $totalWidth
 
-    # Build header line
     $headerLine = ""
     for ($i = 0; $i -lt $headers.Count; $i++) {
         $headerLine += $headers[$i].PadRight($colWidths[$i])
     }
 
-    # Find best OK score for highlighting
     $maxScore = ($Analytics.Values | ForEach-Object { $_.OK } | Measure-Object -Maximum).Maximum
 
     Write-Host ""
@@ -395,10 +395,8 @@ function Write-SummaryTable {
     foreach ($config in $Analytics.Keys) {
         $a = $Analytics[$config]
 
-        # Highlight row with the highest OK count in green, rest in gray
         $rowColor = if ($a.OK -eq $maxScore -and $maxScore -gt 0) { "Green" } else { "Gray" }
 
-        # Truncate strategy name if too long to keep table aligned
         $name = $config
         if ($name.Length -gt ($colWidths[0] - 1)) {
             $name = $name.Substring(0, $colWidths[0] - 4) + "..."
@@ -555,8 +553,6 @@ function Read-ConfigSelection {
         }
 
         $selectedIndices = @()
-
-        # Use a local-scope flag to avoid polluting the outer $hasErrors
         $local:selectionHasWarnings = $false
 
         foreach ($part in $parts) {
@@ -708,8 +704,8 @@ while ($true) {
 
     function Get-WinwsSnapshot {
         try {
-            return Get-CimInstance Win32_Process -Filter "Name='winws.exe'" |
-                Select-Object ProcessId, CommandLine, ExecutablePath
+            return @(Get-CimInstance Win32_Process -Filter "Name='winws.exe'" |
+                Select-Object ProcessId, CommandLine, ExecutablePath)
         } catch {
             return @()
         }
@@ -720,13 +716,28 @@ while ($true) {
 
         if (-not $snapshot -or $snapshot.Count -eq 0) { return }
 
-        $current = @()
-        try { $current = (Get-WinwsSnapshot).CommandLine } catch { $current = @() }
+        # Get command lines of currently running winws instances
+        $currentLines = @()
+        try {
+            $currentLines = @(
+                Get-WinwsSnapshot |
+                    ForEach-Object { $_.CommandLine } |
+                    Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+            )
+        } catch {
+            $currentLines = @()
+        }
 
         Write-Host "[INFO] Restoring previously running winws instances..." -ForegroundColor DarkGray
+
         foreach ($p in $snapshot) {
             if (-not $p.ExecutablePath) { continue }
-            if ($current -and $current -contains $p.CommandLine) { continue }
+
+            # Skip if a process with the same command line is already running
+            if ($currentLines.Count -gt 0 -and $currentLines -contains $p.CommandLine) {
+                Write-Host "[INFO] Already running, skipping: $($p.CommandLine)" -ForegroundColor DarkGray
+                continue
+            }
 
             $exe = $p.ExecutablePath
             $processArgs = ""
@@ -739,11 +750,18 @@ while ($true) {
                 }
             }
 
-            Start-Process -FilePath $exe -ArgumentList $processArgs -WorkingDirectory (Split-Path $exe -Parent) -WindowStyle Minimized | Out-Null
+            try {
+                Start-Process -FilePath $exe -ArgumentList $processArgs -WorkingDirectory (Split-Path $exe -Parent) -WindowStyle Minimized | Out-Null
+                Write-Host "[INFO] Restored winws process." -ForegroundColor DarkGray
+            } catch {
+                Write-Host "[WARN] Failed to restore winws process: $_" -ForegroundColor Yellow
+            }
         }
     }
 
     $env:NO_UPDATE_CHECK = "1"
+
+    # Take snapshot immediately before tests start (not before menu selection)
     $originalWinws = Get-WinwsSnapshot
 
     Write-Host ""
@@ -873,6 +891,7 @@ while ($true) {
                     $runspaces += [PSCustomObject]@{
                         Powershell = $ps
                         Handle     = $ps.BeginInvoke()
+                        Target     = $target
                     }
                 }
 
@@ -894,7 +913,13 @@ while ($true) {
                     try {
                         $targetResults += $rs.Powershell.EndInvoke($rs.Handle)
                     } catch {
-                        $targetResults += [PSCustomObject]@{ Name = 'UNKNOWN'; HttpTokens = @('HTTP:ERROR'); PingResult = 'Timeout'; IsUrl = $true }
+                        Write-Host "[WARN] EndInvoke failed for '$($rs.Target.Name)'; marking as ERROR." -ForegroundColor Yellow
+                        $targetResults += [PSCustomObject]@{
+                            Name       = $rs.Target.Name
+                            HttpTokens = @('HTTP:ERROR', 'TLS1.2:ERROR', 'TLS1.3:ERROR')
+                            PingResult = 'Timeout'
+                            IsUrl      = [bool]$rs.Target.Url
+                        }
                     }
                     $rs.Powershell.Dispose()
                 }
@@ -975,7 +1000,7 @@ while ($true) {
                     }
                     if ($targetRes.IsUrl) {
                         foreach ($tok in $targetRes.HttpTokens) {
-                            if ($tok -match "OK")    { $analytics[$config].OK++ }
+                            if ($tok -match "OK")        { $analytics[$config].OK++ }
                             elseif ($tok -match "SSL")   { $analytics[$config].ERROR++ }
                             elseif ($tok -match "ERROR") { $analytics[$config].ERROR++ }
                             elseif ($tok -match "UNSUP") { $analytics[$config].UNSUP++ }
@@ -1086,7 +1111,6 @@ while ($true) {
         Add-Content $resultFile ""
         Add-Content $resultFile "=== SUMMARY TABLE ==="
 
-        # Summary table to file (plain text, no colors)
         $firstKey   = ($analytics.Keys | Select-Object -First 1)
         $isStandard = $analytics[$firstKey].ContainsKey('PingOK')
         if ($isStandard) {
