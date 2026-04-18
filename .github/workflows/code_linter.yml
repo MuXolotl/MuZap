@@ -1,4 +1,4 @@
-name: Code Linter (PowerShell + Batch) [non-blocking]
+name: Code Linter (PowerShell + Batch)
 
 on:
   push:
@@ -32,19 +32,12 @@ jobs:
       - name: Install PSScriptAnalyzer
         shell: pwsh
         run: |
-          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -AllowClobber
 
-      - name: Run PSScriptAnalyzer (annotations, non-blocking)
+      - name: Run PSScriptAnalyzer (grouped log, non-blocking)
         shell: pwsh
         run: |
-          function Escape-GHA([string]$s) {
-            if ($null -eq $s) { return "" }
-            $s = $s -replace '%','%25'
-            $s = $s -replace "`r",'%0D'
-            $s = $s -replace "`n",'%0A'
-            return $s
-          }
+          $severity = @('Error','Warning','Information')
 
           $psFiles = @(git ls-files '*.ps1' '*.psm1' '*.psd1')
           if (-not $psFiles -or $psFiles.Count -eq 0) {
@@ -52,38 +45,50 @@ jobs:
             exit 0
           }
 
-          $results = @()
+          $totalFindings = 0
 
           foreach ($f in $psFiles) {
+            Write-Host "::group::PSScriptAnalyzer: $f"
+
             try {
-              # -ErrorAction Continue чтобы не стопориться на единичных проблемах чтения/пути
-              $results += @(Invoke-ScriptAnalyzer -Path $f -Severity @('Error','Warning') -ErrorAction Continue)
+              $res = @(Invoke-ScriptAnalyzer -Path $f -Severity $severity)
             }
             catch {
-              $file = Escape-GHA $f
-              $msg  = Escape-GHA $_.Exception.Message
-              Write-Host "::warning file=${file},line=1,title=PSScriptAnalyzer::${msg}"
+              Write-Host "PSScriptAnalyzer crashed for file: $f"
+              Write-Host $_.Exception.Message
+              Write-Host "::endgroup::"
+              continue
             }
+
+            if (-not $res -or $res.Count -eq 0) {
+              Write-Host "OK (no findings)"
+              Write-Host "::endgroup::"
+              continue
+            }
+
+            foreach ($r in $res) {
+              $totalFindings++
+
+              $sev  = [string]$r.Severity
+              $rule = [string]$r.RuleName
+              $line = $r.Line
+              if (-not $line) { $line = 1 }
+
+              # разные версии/выводы иногда дают Column или StartColumnNumber
+              $col = $null
+              if ($r.PSObject.Properties.Name -contains 'Column') { $col = $r.Column }
+              if (-not $col -and ($r.PSObject.Properties.Name -contains 'StartColumnNumber')) { $col = $r.StartColumnNumber }
+              if (-not $col) { $col = 1 }
+
+              $msg = [string]$r.Message
+
+              Write-Host ("[{0}] {1} L{2} C{3}: {4}" -f $sev, $rule, $line, $col, $msg)
+            }
+
+            Write-Host "::endgroup::"
           }
 
-          foreach ($r in @($results)) {
-            $sev = [string]$r.Severity
-            $cmd = if ($sev -eq 'Error') { 'error' } else { 'warning' }
-
-            $file = $r.ScriptName
-            if (-not $file) { $file = $r.ScriptPath }
-            $file = Escape-GHA $file
-
-            $line = $r.Line
-            if (-not $line) { $line = 1 }
-
-            $title = Escape-GHA ("PSScriptAnalyzer " + $r.RuleName)
-            $msg   = Escape-GHA $r.Message
-
-            Write-Host "::${cmd} file=${file},line=${line},title=${title}::${msg}"
-          }
-
-          Write-Host "PSScriptAnalyzer: $(@($results).Count) findings (Errors+Warnings)."
+          Write-Host "PSScriptAnalyzer total findings: $totalFindings"
           exit 0
 
       # ----------------------------
@@ -100,21 +105,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install --no-cache-dir Blinter
 
-      - name: Run Blinter (annotations, non-blocking)
+      - name: Run Blinter (grouped log, non-blocking)
         shell: pwsh
         run: |
           $code = @'
           import subprocess
           import sys
-
           import blinter
-
-          def esc(s: str) -> str:
-            if s is None:
-              return ""
-            return (s.replace("%", "%25")
-                     .replace("\r", "%0D")
-                     .replace("\n", "%0A"))
 
           files = subprocess.check_output(
               ["git", "ls-files", "*.bat", "*.cmd"],
@@ -126,28 +123,44 @@ jobs:
               sys.exit(0)
 
           total = 0
+
           for f in files:
+              print(f"::group::Blinter: {f}")
               try:
                   issues = blinter.lint_batch_file(f)
               except Exception as e:
-                  msg = esc(f"Blinter exception: {e}")
-                  print(f"::warning file={esc(f)},line=1,title=Blinter:::{msg}")
+                  print(f"Blinter crashed for file: {f}")
+                  print(str(e))
+                  print("::endgroup::")
+                  continue
+
+              if not issues:
+                  print("OK (no findings)")
+                  print("::endgroup::")
                   continue
 
               for issue in issues:
                   total += 1
-                  sev = issue.rule.severity.value  # 'Error' / 'Warning' / etc.
-                  cmd = "error" if sev == "Error" else "warning"
-
-                  title = esc(f"Blinter {issue.rule.code}: {issue.rule.name}")
-                  # explanation обычно информативнее, recommendation можно доп. строкой в конце
-                  msg = issue.rule.explanation or issue.rule.recommendation or issue.rule.name
-                  msg = esc(msg)
-
+                  sev = issue.rule.severity.value   # 'Error'/'Warning'/...
+                  code = issue.rule.code
+                  name = issue.rule.name
                   line = getattr(issue, "line_number", None) or 1
-                  print(f"::{cmd} file={esc(f)},line={line},title={title}::{msg}")
 
-          print(f"Blinter: {total} findings.")
+                  explanation = issue.rule.explanation or ""
+                  recommendation = issue.rule.recommendation or ""
+
+                  # одна строка = легче читать в логе
+                  msg = f"[{sev}] {code} L{line}: {name}"
+                  if explanation:
+                      msg += f" | {explanation}"
+                  if recommendation:
+                      msg += f" | Fix: {recommendation}"
+
+                  print(msg)
+
+              print("::endgroup::")
+
+          print(f"Blinter total findings: {total}")
           sys.exit(0)
           '@
 
