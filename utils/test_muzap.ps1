@@ -702,7 +702,24 @@ while ($true) {
         $host.UI.RawUI.WindowTitle = "MuZap Tests [$bar] $Current/$Total$etaStr | $ConfigName"
     }
 
+    # Wait for winws.exe to appear in process list, up to $MaxWaitSeconds
+	function Wait-WinwsStart {
+		param([int]$MaxWaitSeconds = 5)
+
+		$deadline = (Get-Date).AddSeconds($MaxWaitSeconds)
+		while ((Get-Date) -lt $deadline) {
+			if (Get-Process -Name "winws" -ErrorAction SilentlyContinue) {
+				# Process found — give WinDivert time to fully initialize before tests
+				Start-Sleep -Milliseconds 1500
+				return $true
+			}
+			Start-Sleep -Milliseconds 300
+		}
+		return [bool](Get-Process -Name "winws" -ErrorAction SilentlyContinue)
+	}
+
     function Get-WinwsSnapshot {
+        # Need CommandLine to restore later — use CimInstance only here
         try {
             return @(Get-CimInstance Win32_Process -Filter "Name='winws.exe'" |
                 Select-Object ProcessId, CommandLine, ExecutablePath)
@@ -716,16 +733,20 @@ while ($true) {
 
         if (-not $snapshot -or $snapshot.Count -eq 0) { return }
 
-        # Get command lines of currently running winws instances
+        # Get command lines of currently running winws instances via cheap Get-Process first
+        $anyRunning = [bool](Get-Process -Name "winws" -ErrorAction SilentlyContinue)
+
         $currentLines = @()
-        try {
-            $currentLines = @(
-                Get-WinwsSnapshot |
-                    ForEach-Object { $_.CommandLine } |
-                    Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-            )
-        } catch {
-            $currentLines = @()
+        if ($anyRunning) {
+            try {
+                $currentLines = @(
+                    Get-CimInstance Win32_Process -Filter "Name='winws.exe'" |
+                        ForEach-Object { $_.CommandLine } |
+                        Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+                )
+            } catch {
+                $currentLines = @()
+            }
         }
 
         Write-Host "[INFO] Restoring previously running winws instances..." -ForegroundColor DarkGray
@@ -733,7 +754,6 @@ while ($true) {
         foreach ($p in $snapshot) {
             if (-not $p.ExecutablePath) { continue }
 
-            # Skip if a process with the same command line is already running
             if ($currentLines.Count -gt 0 -and $currentLines -contains $p.CommandLine) {
                 Write-Host "[INFO] Already running, skipping: $($p.CommandLine)" -ForegroundColor DarkGray
                 continue
@@ -795,15 +815,19 @@ while ($true) {
             Stop-Zapret
 
             $rawParams   = $strategy.Params
-            $finalParams = $rawParams -replace '%BIN%',          $binPath `
-                                      -replace '%LISTS%',        $listsPath `
+            $finalParams = $rawParams -replace '%BIN%',           $binPath `
+                                      -replace '%LISTS%',         $listsPath `
                                       -replace '%GameFilterTCP%', $gamePorts.TCP `
                                       -replace '%GameFilterUDP%', $gamePorts.UDP
 
             Write-Host "  > Starting config..." -ForegroundColor Cyan
             $proc = Start-Process -FilePath $winwsExe -ArgumentList $finalParams -WorkingDirectory $binPath -PassThru -WindowStyle Minimized
 
-            Start-Sleep -Seconds 5
+            # Wait until winws.exe is actually running instead of fixed sleep
+            $started = Wait-WinwsStart -MaxWaitSeconds 5
+            if (-not $started) {
+                Write-Host "  [WARN] winws.exe did not appear within 5s, continuing anyway..." -ForegroundColor Yellow
+            }
 
             if ($testType -eq 'standard') {
                 $curlTimeoutSeconds = 5
@@ -1017,7 +1041,7 @@ while ($true) {
                         $analytics[$config] = @{ OK = 0; FAIL = 0; UNSUPPORTED = 0; LIKELY_BLOCKED = 0 }
                     }
                     foreach ($line in $targetRes.Lines) {
-                        if ($line.Status -eq "OK")             { $analytics[$config].OK++ }
+                        if ($line.Status -eq "OK")                 { $analytics[$config].OK++ }
                         elseif ($line.Status -eq "FAIL")           { $analytics[$config].FAIL++ }
                         elseif ($line.Status -eq "UNSUPPORTED")    { $analytics[$config].UNSUPPORTED++ }
                         elseif ($line.Status -eq "LIKELY_BLOCKED") { $analytics[$config].LIKELY_BLOCKED++ }
