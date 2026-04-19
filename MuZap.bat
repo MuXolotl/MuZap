@@ -61,6 +61,7 @@ set "LOCAL_VERSION=!CFG_Version!"
 call :ipset_switch_status
 call :game_switch_status
 call :current_strategy_status
+call :telemetry_status
 
 set "menu_choice=null"
 
@@ -68,8 +69,8 @@ echo.
 echo           MUZAP SERVICE MANAGER v!LOCAL_VERSION!
 echo ================================================
 echo.
-echo   1.  Service      ^| Strategy: [!CurrentStrategy!]
-echo   2.  Settings     ^| Game: [!GameFilterStatus!] / IPSet: [!IPsetStatus!]
+echo   1.  Service   ^| Strategy: [!CurrentStrategy!]
+echo   2.  Settings  ^| Game: [!GameFilterStatus!] / IPSet: [!IPsetStatus!]
 echo   3.  Updates
 echo   4.  Tools
 echo ------------------------------------------------
@@ -98,7 +99,7 @@ echo.
 echo                SERVICE MANAGEMENT
 echo ================================================
 echo.
-echo   1.  Install ^| Change Strategy  [!CurrentStrategy!]
+echo   1.  Install  ^| Change Strategy  [!CurrentStrategy!]
 echo   2.  Restart
 echo   3.  Remove
 echo   4.  Status
@@ -122,6 +123,7 @@ cls
 
 call :ipset_switch_status
 call :game_switch_status
+call :telemetry_status
 
 set "menu_choice=null"
 
@@ -131,14 +133,16 @@ echo ================================================
 echo.
 echo   1.  Game Filter     [!GameFilterStatus!]
 echo   2.  IPSet Filter    [!IPsetStatus!]
+echo   3.  Telemetry       [!TelemetryStatus!]
 echo ------------------------------------------------
 echo   0.  Back
 echo.
 
-set /p menu_choice=   Select (0-2):
+set /p menu_choice=   Select (0-3):
 
 if "%menu_choice%"=="1" goto game_switch
 if "%menu_choice%"=="2" goto ipset_switch
+if "%menu_choice%"=="3" goto telemetry_switch
 if "%menu_choice%"=="0" goto menu
 goto menu_settings
 
@@ -446,7 +450,7 @@ pause
 goto menu_service
 
 
-:: SILENT REINSTALL (used by game_switch auto-apply) ===
+:: SILENT REINSTALL ====================
 :service_reinstall_silent
 
 set "REINSTALL_STRATEGY="
@@ -630,7 +634,6 @@ if !proxyEnabled!==1 (
     for /f "tokens=2*" %%A in ('reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyServer 2^>nul ^| findstr /i "ProxyServer"') do (
         set "proxyServer=%%B"
     )
-
     call :PrintYellow "[?] System proxy is enabled: !proxyServer!"
     call :PrintYellow "Make sure it's valid or disable it if you don't use a proxy"
 ) else (
@@ -1160,6 +1163,60 @@ pause
 goto menu_settings
 
 
+:: TELEMETRY SWITCH ====================
+:telemetry_status
+if /i "%CFG_TelemetryEnabled%"=="true" (
+    set "TelemetryStatus=on"
+) else (
+    set "TelemetryStatus=off"
+)
+exit /b
+
+:telemetry_switch
+cls
+
+call :telemetry_status
+
+echo Current Telemetry mode: [!TelemetryStatus!]
+echo.
+echo Telemetry sends anonymous test results to help identify
+echo which strategies work best across different ISPs and regions.
+echo No IP address is ever stored or transmitted.
+echo.
+echo   1.  Enable
+echo   2.  Disable
+echo ------------------------------------------------
+echo   0.  Back
+echo.
+set "TELE_CHOICE="
+set /p "TELE_CHOICE=Select (0-2): "
+
+if "!TELE_CHOICE!"=="0" goto menu_settings
+
+if "!TELE_CHOICE!"=="1" (
+    if /i "!TelemetryStatus!"=="on" (
+        call :PrintYellow "Telemetry is already enabled."
+        pause
+        goto menu_settings
+    )
+    call :config_set Features TelemetryEnabled true
+    call :PrintGreen "Telemetry enabled. Results will be sent after the next standard test run."
+) else if "!TELE_CHOICE!"=="2" (
+    if /i "!TelemetryStatus!"=="off" (
+        call :PrintYellow "Telemetry is already disabled."
+        pause
+        goto menu_settings
+    )
+    call :config_set Features TelemetryEnabled false
+    call :PrintGreen "Telemetry disabled."
+) else (
+    call :PrintYellow "Invalid choice."
+)
+
+pause
+goto menu_settings
+
+
 :: IPSET UPDATE ========================
 :ipset_update
 cls
@@ -1311,7 +1368,7 @@ pause
 goto menu_tools
 
 
-:: Utility functions
+:: Utility functions ===================
 
 :PrintGreen
 echo %GREEN%%~1%RESET%
@@ -1385,18 +1442,18 @@ if /i "%BOOT_GameFilterMode%"=="all" (
     echo ; Values:
     echo ;   GameFilterMode: off ^| all ^| tcp ^| udp
     echo ;
+    echo ; Telemetry:
+    echo ;   TelemetryEnabled: true ^| false
+    echo ;
     echo ; Hosts backup:
-    echo ;   BackupMode:
-    echo ;     off       - no backups
-    echo ;     once      - create only one "original" backup and never create more
-    echo ;     single    - keep one rolling backup (overwrite each time^)
-    echo ;     timestamp - create a timestamped backup each time ^(not recommended^)
+    echo ;   BackupMode: off ^| once ^| single ^| timestamp
     echo.
     echo [App]
     echo Version=unknown
     echo.
     echo [Features]
     echo GameFilterMode=%BOOT_GameFilterMode%
+    echo TelemetryEnabled=false
     echo.
     echo [Hosts]
     echo BackupMode=once
@@ -1412,12 +1469,14 @@ setlocal EnableDelayedExpansion
 set "CFG_Version=unknown"
 set "CFG_GameFilterMode=off"
 set "CFG_HostsBackupMode=once"
+set "CFG_TelemetryEnabled=false"
 
 if not exist "%CONFIG_FILE%" (
     endlocal & (
         set "CFG_Version=unknown"
         set "CFG_GameFilterMode=off"
         set "CFG_HostsBackupMode=once"
+        set "CFG_TelemetryEnabled=false"
     )
     exit /b
 )
@@ -1447,7 +1506,8 @@ for /f "usebackq delims=" %%L in ("%CONFIG_FILE%") do (
                 if /i "!k!"=="Version" set "CFG_Version=!v!"
             )
             if /i "!section!"=="Features" (
-                if /i "!k!"=="GameFilterMode" set "CFG_GameFilterMode=!v!"
+                if /i "!k!"=="GameFilterMode"     set "CFG_GameFilterMode=!v!"
+                if /i "!k!"=="TelemetryEnabled"   set "CFG_TelemetryEnabled=!v!"
             )
             if /i "!section!"=="Hosts" (
                 if /i "!k!"=="BackupMode" set "CFG_HostsBackupMode=!v!"
@@ -1456,13 +1516,15 @@ for /f "usebackq delims=" %%L in ("%CONFIG_FILE%") do (
     )
 )
 
-if /i "!CFG_GameFilterMode!" NEQ "off" if /i "!CFG_GameFilterMode!" NEQ "all" if /i "!CFG_GameFilterMode!" NEQ "tcp" if /i "!CFG_GameFilterMode!" NEQ "udp" set "CFG_GameFilterMode=off"
-if /i "!CFG_HostsBackupMode!" NEQ "off" if /i "!CFG_HostsBackupMode!" NEQ "once" if /i "!CFG_HostsBackupMode!" NEQ "single" if /i "!CFG_HostsBackupMode!" NEQ "timestamp" set "CFG_HostsBackupMode=once"
+if /i "!CFG_GameFilterMode!"     NEQ "off"   if /i "!CFG_GameFilterMode!"     NEQ "all"   if /i "!CFG_GameFilterMode!"     NEQ "tcp"   if /i "!CFG_GameFilterMode!"     NEQ "udp"   set "CFG_GameFilterMode=off"
+if /i "!CFG_HostsBackupMode!"    NEQ "off"   if /i "!CFG_HostsBackupMode!"    NEQ "once"  if /i "!CFG_HostsBackupMode!"    NEQ "single" if /i "!CFG_HostsBackupMode!"   NEQ "timestamp" set "CFG_HostsBackupMode=once"
+if /i "!CFG_TelemetryEnabled!"   NEQ "true"  if /i "!CFG_TelemetryEnabled!"   NEQ "false" set "CFG_TelemetryEnabled=false"
 
 endlocal & (
     set "CFG_Version=%CFG_Version%"
     set "CFG_GameFilterMode=%CFG_GameFilterMode%"
     set "CFG_HostsBackupMode=%CFG_HostsBackupMode%"
+    set "CFG_TelemetryEnabled=%CFG_TelemetryEnabled%"
 )
 exit /b
 
