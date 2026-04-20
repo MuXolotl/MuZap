@@ -1,0 +1,8 @@
+# Статическая линковка vcruntime,
+# чтобы exe не требовал Visual C++ Redistributable у пользователя
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=libvcruntime.lib"]
+
+[target.i686-pc-windows-msvc]
+rustflags = ["-C", "link-arg=libvcruntime.lib"]

@@ -535,76 +535,49 @@ exit /b 0
 cls
 
 call :config_load
-set "LOCAL_VERSION=!CFG_Version!"
 
-set "GITHUB_API_URL=https://api.github.com/repos/MuXolotl/MuZap/releases/latest"
-set "GITHUB_RELEASE_BASE_URL=https://github.com/MuXolotl/MuZap/releases/tag/"
-
-for /f "delims=" %%A in ('powershell -NoProfile -Command ^
-    "try { $r = Invoke-RestMethod -Uri '%GITHUB_API_URL%' -Headers @{'User-Agent'='MuZap'} -TimeoutSec 10; $r.tag_name -replace '^v','' } catch { '' }" 2^>nul') do set "GITHUB_VERSION=%%A"
-
-if not defined GITHUB_VERSION (
-    call :PrintRed "Warning: failed to fetch the latest version. Check your internet connection."
-    pause
-    goto menu_updates
-)
-
-if "!LOCAL_VERSION!"=="!GITHUB_VERSION!" (
-    call :PrintGreen "Latest version is already installed: !LOCAL_VERSION!"
-    pause
-    goto menu_updates
-)
-
-echo New version available: !GITHUB_VERSION! (current: !LOCAL_VERSION!)
-echo Release page: %GITHUB_RELEASE_BASE_URL%!GITHUB_VERSION!
-echo.
-
-set "UPDATE_CHOICE="
-set /p "UPDATE_CHOICE=Do you want to update now? (Y/N, default: Y): "
-if "!UPDATE_CHOICE!"=="" set "UPDATE_CHOICE=Y"
-if /i "!UPDATE_CHOICE!"=="y" set "UPDATE_CHOICE=Y"
-
-if /i "!UPDATE_CHOICE!" neq "Y" (
-    echo Update cancelled.
-    pause
-    goto menu_updates
-)
-
-set "UPDATE_SCRIPT=%~dp0utils\update.ps1"
-if not exist "%UPDATE_SCRIPT%" (
-    call :PrintRed "update.ps1 not found in utils. Cannot update MuZap."
-    pause
-    goto menu_updates
-)
-
-echo.
-echo Running MuZap updater...
 set "MUZAP_ROOT=%~dp0"
 if "!MUZAP_ROOT:~-1!"=="\" set "MUZAP_ROOT=!MUZAP_ROOT:~0,-1!"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%UPDATE_SCRIPT%" -RootDir "!MUZAP_ROOT!"
+set "UPDATER_EXE=!MUZAP_ROOT!\Update MuZap.exe"
 
-if !errorlevel!==0 (
+echo.
+echo =================================================
+echo                  UPDATE CHECK
+echo =================================================
+echo.
+
+if not exist "!UPDATER_EXE!" (
+    call :PrintRed "Updater executable not found in MuZap root directory."
+    pause
+    goto menu_updates
+)
+
+echo Local version: !CFG_Version!
+echo Updater: "!UPDATER_EXE!"
+echo.
+echo Starting updater...
+echo.
+
+"!UPDATER_EXE!" --root "!MUZAP_ROOT!" --no-pause
+set "UPDATER_RC=!errorlevel!"
+
+if not "!UPDATER_RC!"=="0" (
     echo.
-    call :PrintGreen "MuZap updated successfully."
-    call :PrintYellow "Restarting to apply update..."
-    timeout /t 1 /nobreak > nul
+    call :PrintRed "Updater failed. Exit code: !UPDATER_RC!"
+    pause
+    goto menu_updates
+)
 
-    set "PENDING=%~dp0.service\MuZap.bat.pending"
-    set "MAINBAT=%~f0"
-    set "BAT_HELPER=%TEMP%\muzap_apply.bat"
-
-    (
-        echo @echo off
-        echo timeout /t 2 /nobreak ^> nul
-        echo if exist "!PENDING!" move /y "!PENDING!" "!MAINBAT!"
-        echo start "" "!MAINBAT!"
-        echo del /f /q "%%~f0"
-    ) > "!BAT_HELPER!"
-
-    start "" /b cmd /c "!BAT_HELPER!"
+set "PENDING=!MUZAP_ROOT!\.service\MuZap.bat.pending"
+if exist "!PENDING!" (
+    echo.
+    call :PrintYellow "Pending MuZap.bat update found. Applying and restarting..."
+    call :apply_pending_bat "!MUZAP_ROOT!" "%~f0"
     exit
 )
 
+echo.
+call :PrintGreen "Done. Returning to menu."
 pause
 goto menu_updates
 
@@ -1366,6 +1339,27 @@ echo.
 start "" powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0utils\test_muzap.ps1"
 pause
 goto menu_tools
+
+
+:apply_pending_bat
+setlocal DisableDelayedExpansion
+
+set "ROOT=%~1"
+set "MAINBAT=%~2"
+set "PENDING=%ROOT%\.service\MuZap.bat.pending"
+set "HELPER=%TEMP%\muzap_apply.bat"
+
+(
+    echo @echo off
+    echo timeout /t 2 /nobreak ^> nul
+    echo if exist "%PENDING%" move /y "%PENDING%" "%MAINBAT%" ^> nul
+    echo start "" "%MAINBAT%"
+    echo del /f /q "%%~f0" ^> nul
+) > "%HELPER%"
+
+start "" /b cmd /c "%HELPER%"
+endlocal
+exit /b
 
 
 :: Utility functions ===================

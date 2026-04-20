@@ -48,7 +48,8 @@ jobs:
             -x ".github/*" \
             -x ".gitattributes" \
             -x ".gitignore" \
-            -x ".service/*"
+            -x ".service/*" \
+            -x "rust/*"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
