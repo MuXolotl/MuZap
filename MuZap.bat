@@ -1240,11 +1240,11 @@ cls
 
 set "hostsFile=%SystemRoot%\System32\drivers\etc\hosts"
 set "hostsUrl=https://raw.githubusercontent.com/MuXolotl/MuZap/main/.service/hosts"
-set "tempFile=%TEMP%\muzap_hosts.txt"
-set "helperPs1=%~dp0utils\hosts_manage.ps1"
+set "tempFile=%TEMP%\muzap_hosts_src.txt"
+set "helperExe=%~dp0utils\hosts_manage.exe"
 
-if not exist "%helperPs1%" (
-    call :PrintRed "hosts_manage.ps1 not found in utils. Cannot update hosts."
+if not exist "!helperExe!" (
+    call :PrintRed "hosts_manage.exe not found in utils folder."
     pause
     goto menu_updates
 )
@@ -1276,10 +1276,10 @@ if !errorlevel! neq 0 (
     goto menu_updates
 )
 
-echo Updating MuZap section in system hosts (BackupMode=%CFG_HostsBackupMode%)...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%helperPs1%" -Action Update -HostsFile "%hostsFile%" -SourceFile "%tempFile%" -MarkerName "MuZap" -BackupMode "%CFG_HostsBackupMode%"
+echo Updating MuZap section in system hosts...
+"!helperExe!" --no-pause --hosts-file "%hostsFile%" --marker-name "MuZap" update --source-file "%tempFile%"
 if !errorlevel! neq 0 (
-    call :PrintRed "Hosts update failed (PowerShell helper returned error)."
+    call :PrintRed "Hosts update failed (hosts_manage.exe returned error)."
     if exist "%tempFile%" del /f /q "%tempFile%"
     pause
     goto menu_updates
@@ -1294,22 +1294,23 @@ pause
 goto menu_updates
 
 
+:: HOSTS REMOVE ========================
 :hosts_remove
 cls
 
 set "hostsFile=%SystemRoot%\System32\drivers\etc\hosts"
-set "helperPs1=%~dp0utils\hosts_manage.ps1"
+set "helperExe=%~dp0utils\hosts_manage.exe"
 
-if not exist "%helperPs1%" (
-    call :PrintRed "hosts_manage.ps1 not found in utils. Cannot remove hosts section."
+if not exist "!helperExe!" (
+    call :PrintRed "hosts_manage.exe not found in utils folder."
     pause
     goto menu_updates
 )
 
-echo Removing MuZap section from system hosts (BackupMode=%CFG_HostsBackupMode%)...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%helperPs1%" -Action Remove -HostsFile "%hostsFile%" -MarkerName "MuZap" -BackupMode "%CFG_HostsBackupMode%"
+echo Removing MuZap section from system hosts...
+"!helperExe!" --no-pause --hosts-file "%hostsFile%" --marker-name "MuZap" remove
 if !errorlevel! neq 0 (
-    call :PrintRed "Hosts remove failed (PowerShell helper returned error)."
+    call :PrintRed "Hosts remove failed (hosts_manage.exe returned error)."
     pause
     goto menu_updates
 )
@@ -1438,9 +1439,6 @@ if /i "%BOOT_GameFilterMode%"=="all" (
     echo ;
     echo ; Telemetry:
     echo ;   TelemetryEnabled: true ^| false
-    echo ;
-    echo ; Hosts backup:
-    echo ;   BackupMode: off ^| once ^| single ^| timestamp
     echo.
     echo [App]
     echo Version=unknown
@@ -1448,9 +1446,6 @@ if /i "%BOOT_GameFilterMode%"=="all" (
     echo [Features]
     echo GameFilterMode=%BOOT_GameFilterMode%
     echo TelemetryEnabled=false
-    echo.
-    echo [Hosts]
-    echo BackupMode=once
     echo.
 )>"%CONFIG_FILE%"
 
@@ -1462,14 +1457,12 @@ setlocal EnableDelayedExpansion
 
 set "CFG_Version=unknown"
 set "CFG_GameFilterMode=off"
-set "CFG_HostsBackupMode=once"
 set "CFG_TelemetryEnabled=false"
 
 if not exist "%CONFIG_FILE%" (
     endlocal & (
         set "CFG_Version=unknown"
         set "CFG_GameFilterMode=off"
-        set "CFG_HostsBackupMode=once"
         set "CFG_TelemetryEnabled=false"
     )
     exit /b
@@ -1503,21 +1496,16 @@ for /f "usebackq delims=" %%L in ("%CONFIG_FILE%") do (
                 if /i "!k!"=="GameFilterMode"     set "CFG_GameFilterMode=!v!"
                 if /i "!k!"=="TelemetryEnabled"   set "CFG_TelemetryEnabled=!v!"
             )
-            if /i "!section!"=="Hosts" (
-                if /i "!k!"=="BackupMode" set "CFG_HostsBackupMode=!v!"
-            )
         )
     )
 )
 
-if /i "!CFG_GameFilterMode!"     NEQ "off"   if /i "!CFG_GameFilterMode!"     NEQ "all"   if /i "!CFG_GameFilterMode!"     NEQ "tcp"   if /i "!CFG_GameFilterMode!"     NEQ "udp"   set "CFG_GameFilterMode=off"
-if /i "!CFG_HostsBackupMode!"    NEQ "off"   if /i "!CFG_HostsBackupMode!"    NEQ "once"  if /i "!CFG_HostsBackupMode!"    NEQ "single" if /i "!CFG_HostsBackupMode!"   NEQ "timestamp" set "CFG_HostsBackupMode=once"
-if /i "!CFG_TelemetryEnabled!"   NEQ "true"  if /i "!CFG_TelemetryEnabled!"   NEQ "false" set "CFG_TelemetryEnabled=false"
+if /i "!CFG_GameFilterMode!"   NEQ "off"   if /i "!CFG_GameFilterMode!"   NEQ "all"   if /i "!CFG_GameFilterMode!"   NEQ "tcp"   if /i "!CFG_GameFilterMode!"   NEQ "udp"   set "CFG_GameFilterMode=off"
+if /i "!CFG_TelemetryEnabled!" NEQ "true"  if /i "!CFG_TelemetryEnabled!" NEQ "false" set "CFG_TelemetryEnabled=false"
 
 endlocal & (
     set "CFG_Version=%CFG_Version%"
     set "CFG_GameFilterMode=%CFG_GameFilterMode%"
-    set "CFG_HostsBackupMode=%CFG_HostsBackupMode%"
     set "CFG_TelemetryEnabled=%CFG_TelemetryEnabled%"
 )
 exit /b
