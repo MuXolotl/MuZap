@@ -9,8 +9,7 @@ mod ui;
 
 use std::{fs, io};
 
-use crossterm::execute;
-use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
+use crossterm::style::Color;
 
 use analytics::{build_analytics, find_best, print_analytics, print_summary_table};
 use checker::run_standard_tests;
@@ -20,6 +19,9 @@ use report::save_report;
 use runner::{restore_winws_snapshot, stop_zapret, take_winws_snapshot, wait_for_winws};
 use telemetry::send_telemetry;
 use ui::{ask_config_selection, ask_mode, ask_test_type, TestMode, TestType};
+
+// Переиспользуем общий вывод из muzap_core (чтобы остальные модули могли звать crate::print_colored_tag)
+pub use muzap_core::print::{print_colored_inline, print_colored_tag};
 
 // ─── Структуры результатов ────────────────────────────────────────────────────
 
@@ -286,12 +288,7 @@ fn run() -> Result<(), AppError> {
 // ─── Вспомогательные функции ──────────────────────────────────────────────────
 
 fn substitute_params(params: &str, bin: &str, lists: &str, tcp: &str, udp: &str) -> String {
-    params
-        .replace("%BIN%", bin)
-        .replace("%LISTS%", lists)
-        .replace("%GameFilterTCP%", tcp)
-        .replace("%GameFilterUDP%", udp)
-        .replace("EXCL_MARK", "!")
+    muzap_core::params::substitute_params(params, bin, lists, tcp, udp)
 }
 
 fn print_run_result(r: &RunResult) {
@@ -372,72 +369,18 @@ fn print_separator() {
     println!("{}", "-".repeat(60));
 }
 
-// ─── Цветной вывод ────────────────────────────────────────────────────────────
-
-pub fn print_colored_tag(tag: &str, color: Color, msg: &str) {
-    let mut stdout = io::stdout();
-    let _ = execute!(
-        stdout,
-        SetForegroundColor(color),
-        Print(format!("{tag} ")),
-        ResetColor,
-        Print(msg),
-        Print("\n")
-    );
-}
-
-pub fn print_colored_inline(text: &str, color: Color) {
-    let mut stdout = io::stdout();
-    let _ = execute!(stdout, SetForegroundColor(color), Print(text), ResetColor);
-}
-
 // ─── Проверка прав администратора ────────────────────────────────────────────
 
 fn check_admin() -> Result<(), AppError> {
-    if !windows_check::is_elevated() {
-        return Err(AppError::msg(
-            "Требуются права администратора. Запустите через MuZap.bat.",
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-mod windows_check {
-    use std::mem;
-
-    pub fn is_elevated() -> bool {
-        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
-        use windows_sys::Win32::Security::{
-            GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
-        };
-        use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-
-        unsafe {
-            let mut token: HANDLE = std::ptr::null_mut();
-            if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
-                return false;
-            }
-            let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
-            let mut size: u32 = 0;
-            let ok = GetTokenInformation(
-                token,
-                TokenElevation,
-                &mut elevation as *mut _ as *mut _,
-                mem::size_of::<TOKEN_ELEVATION>() as u32,
-                &mut size,
-            );
-            CloseHandle(token);
-            ok != 0 && elevation.TokenIsElevated != 0
+    #[cfg(windows)]
+    {
+        if !muzap_core::win::elevation::is_elevated() {
+            return Err(AppError::msg(
+                "Требуются права администратора. Запустите через MuZap.bat.",
+            ));
         }
     }
-}
-
-#[cfg(not(windows))]
-mod windows_check {
-    pub fn is_elevated() -> bool {
-        true
-    }
+    Ok(())
 }
 
 // ─── Пауза ────────────────────────────────────────────────────────────────────
@@ -445,7 +388,7 @@ mod windows_check {
 fn pause() {
     // Явно выключаем raw-режим и показываем курсор перед ожиданием Enter
     let _ = crossterm::terminal::disable_raw_mode();
-    let _ = execute!(io::stdout(), crossterm::cursor::Show);
+    let _ = crossterm::execute!(io::stdout(), crossterm::cursor::Show);
 
     println!();
     println!("Нажмите Enter для выхода...");
@@ -479,5 +422,11 @@ pub enum AppError {
 impl AppError {
     pub fn msg(s: impl Into<String>) -> Self {
         Self::Msg(s.into())
+    }
+}
+
+impl From<muzap_core::CoreError> for AppError {
+    fn from(e: muzap_core::CoreError) -> Self {
+        AppError::msg(e.to_string())
     }
 }

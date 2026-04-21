@@ -39,6 +39,9 @@ enum AppError {
     #[error("{0}")]
     Msg(String),
 
+    #[error("Ошибка muzap_core: {0}")]
+    Core(#[from] muzap_core::CoreError),
+
     #[error("Не найден ZIP-ассет MuZap_*.zip в релизе")]
     NoZipAsset,
 
@@ -235,7 +238,7 @@ fn real_main() -> AppResult<()> {
     apply_update(&args.root, &extracted_root)?;
 
     // Записать версию в muzap.ini
-    write_ini_value(&ini_path, "App", "Version", &remote_version_str)?;
+    muzap_core::ini::write_ini_value(&ini_path, "App", "Version", &remote_version_str)?;
     print_ok(&format!(
         "Версия в muzap.ini обновлена на {remote_version_str}."
     ));
@@ -330,30 +333,14 @@ fn print_help() {
 }
 
 fn detect_root_dir() -> PathBuf {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    if let Some(found) = find_root_upwards(&cwd, 10) {
+    // Предпочтительно: общий поиск корня через muzap_core (по наличию muzap.ini)
+    if let Ok(found) = muzap_core::paths::detect_root(10) {
         return found;
     }
 
+    // Fallback: папка exe
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
-    let exe_dir = exe.parent().unwrap_or(Path::new(".")).to_path_buf();
-    if let Some(found) = find_root_upwards(&exe_dir, 10) {
-        return found;
-    }
-
-    exe_dir
-}
-
-fn find_root_upwards(start: &Path, max_levels: usize) -> Option<PathBuf> {
-    let mut cur: Option<&Path> = Some(start);
-    for _ in 0..=max_levels {
-        let p = cur?;
-        if p.join("muzap.ini").exists() {
-            return Some(p.to_path_buf());
-        }
-        cur = p.parent();
-    }
-    None
+    exe.parent().unwrap_or(Path::new(".")).to_path_buf()
 }
 
 fn read_local_version(ini_path: &Path) -> Option<String> {
@@ -572,72 +559,6 @@ fn apply_update(root: &Path, extracted_root: &Path) -> AppResult<()> {
 fn normalize_rel(p: &Path) -> String {
     let s = p.to_string_lossy().replace('\\', "/");
     s.trim_start_matches("./").to_string()
-}
-
-fn write_ini_value(path: &Path, section: &str, key: &str, value: &str) -> AppResult<()> {
-    let mut text = String::new();
-    let mut eol = "\r\n".to_string();
-
-    if path.exists() {
-        let raw = fs::read_to_string(path)?;
-        eol = if raw.contains("\r\n") { "\r\n" } else { "\n" }.to_string();
-        text = raw;
-    }
-
-    let mut out: Vec<String> = Vec::new();
-    let mut in_section = false;
-    let mut section_found = false;
-    let mut key_set = false;
-
-    for line in text.lines() {
-        let t = line.trim();
-
-        if t.starts_with('[') && t.ends_with(']') {
-            if in_section && !key_set {
-                out.push(format!("{key}={value}"));
-                key_set = true;
-            }
-
-            let cur = &t[1..t.len() - 1];
-            if cur.eq_ignore_ascii_case(section) {
-                in_section = true;
-                section_found = true;
-            } else {
-                in_section = false;
-            }
-
-            out.push(line.to_string());
-            continue;
-        }
-
-        if in_section {
-            if let Some((k, _v)) = t.split_once('=') {
-                if k.trim().eq_ignore_ascii_case(key) {
-                    out.push(format!("{key}={value}"));
-                    key_set = true;
-                    continue;
-                }
-            }
-        }
-
-        out.push(line.to_string());
-    }
-
-    if section_found && !key_set {
-        out.push(format!("{key}={value}"));
-    }
-
-    if !section_found {
-        if !out.is_empty() && !out.last().unwrap().trim().is_empty() {
-            out.push("".to_string());
-        }
-        out.push(format!("[{section}]"));
-        out.push(format!("{key}={value}"));
-    }
-
-    let final_text = out.join(&eol) + &eol;
-    fs::write(path, final_text)?;
-    Ok(())
 }
 
 fn stop_service_best_effort(name: &str) {

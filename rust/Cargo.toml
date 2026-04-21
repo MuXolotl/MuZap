@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "muzap_core",
   "muzap_updater",
   "muzap_hosts",
   "muzap_tester"

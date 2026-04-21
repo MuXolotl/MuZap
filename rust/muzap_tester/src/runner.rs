@@ -9,7 +9,7 @@ use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
 // ─── Запуск winws ─────────────────────────────────────────────────────────────
 
 pub fn start_winws(exe: &Path, params: &str) -> Result<Option<Child>, crate::AppError> {
-    let args = split_args(params);
+    let args = muzap_core::process::split_args(params);
 
     let child = Command::new(exe)
         .args(&args)
@@ -165,7 +165,7 @@ pub fn restore_winws_snapshot(snapshot: &[WinwsSnapshot]) {
             .unwrap_or("")
             .trim();
 
-        let args = split_args(args_str);
+        let args = muzap_core::process::split_args(args_str);
 
         match Command::new(exe_path)
             .args(&args)
@@ -186,39 +186,4 @@ pub fn restore_winws_snapshot(snapshot: &[WinwsSnapshot]) {
             ),
         }
     }
-}
-
-// ─── Парсер аргументов ────────────────────────────────────────────────────────
-
-pub fn split_args(s: &str) -> Vec<String> {
-    let mut args = Vec::new();
-    let mut current = String::new();
-    let mut in_double = false;
-    let mut in_single = false;
-
-    for c in s.chars() {
-        match c {
-            '"' if !in_single => {
-                in_double = !in_double;
-            }
-            '\'' if !in_double => {
-                in_single = !in_single;
-            }
-            ' ' | '\t' if !in_double && !in_single => {
-                if !current.is_empty() {
-                    args.push(current.clone());
-                    current.clear();
-                }
-            }
-            _ => {
-                current.push(c);
-            }
-        }
-    }
-
-    if !current.is_empty() {
-        args.push(current);
-    }
-
-    args
 }

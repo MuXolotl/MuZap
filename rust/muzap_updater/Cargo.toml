@@ -17,6 +17,8 @@ name = "muzap_update"
 path = "src/main.rs"
 
 [dependencies]
+muzap_core = { path = "../muzap_core" }
+
 reqwest = { version = "0.13", features = ["blocking", "json"] }
 serde = { version = "1.0", features = ["derive"] }
 semver = "1.0"
