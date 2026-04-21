@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "muzap_updater",
-  "muzap_hosts"
+  "muzap_hosts",
+  "muzap_tester"
 ]
 resolver = "2"

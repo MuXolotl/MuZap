@@ -1326,41 +1326,28 @@ goto menu_updates
 :run_tests
 cls
 
-powershell -NoProfile -Command "if ($PSVersionTable -and $PSVersionTable.PSVersion -and $PSVersionTable.PSVersion.Major -ge 3) { exit 0 } else { exit 1 }" >nul 2>&1
-if %errorLevel% neq 0 (
-    echo PowerShell 3.0 or newer is required.
-    echo Please upgrade PowerShell and rerun this script.
+set "TESTER_EXE=%~dp0utils\muzap_tester.exe"
+
+echo.
+echo =================================================
+echo                   RUN TESTS
+echo =================================================
+echo.
+
+if not exist "!TESTER_EXE!" (
+    call :PrintRed "muzap_tester.exe not found in utils folder."
     echo.
+    echo Expected path: !TESTER_EXE!
     pause
     goto menu_tools
 )
 
-echo Starting configuration tests in PowerShell window...
+echo Starting muzap_tester...
 echo.
-start "" powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0utils\test_muzap.ps1"
+
+start "" "!TESTER_EXE!"
 pause
 goto menu_tools
-
-
-:apply_pending_bat
-setlocal DisableDelayedExpansion
-
-set "ROOT=%~1"
-set "MAINBAT=%~2"
-set "PENDING=%ROOT%\.service\MuZap.bat.pending"
-set "HELPER=%TEMP%\muzap_apply.bat"
-
-(
-    echo @echo off
-    echo timeout /t 2 /nobreak ^> nul
-    echo if exist "%PENDING%" move /y "%PENDING%" "%MAINBAT%" ^> nul
-    echo start "" "%MAINBAT%"
-    echo del /f /q "%%~f0" ^> nul
-) > "%HELPER%"
-
-start "" /b cmd /c "%HELPER%"
-endlocal
-exit /b
 
 
 :: Utility functions ===================

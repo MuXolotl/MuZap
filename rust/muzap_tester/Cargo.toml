@@ -1,0 +1,33 @@
+[package]
+name = "muzap_tester"
+description = "MuZap: тестирование стратегий (HTTP/TLS/ping/DPI)"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["MuZap contributors"]
+build = "build.rs"
+
+[[bin]]
+name = "muzap_tester"
+path = "src/main.rs"
+
+[dependencies]
+tokio      = { version = "1",    features = ["full"] }
+reqwest    = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+serde      = { version = "1",    features = ["derive"] }
+serde_json = "1"
+crossterm  = "0.28"
+indicatif  = "0.17"
+sysinfo    = "0.38"
+thiserror  = "2.0"
+chrono     = { version = "0.4", default-features = false, features = ["clock"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_Threading",
+] }
+
+[build-dependencies]
+winresource = "0.1"
