@@ -1241,10 +1241,10 @@ cls
 set "hostsFile=%SystemRoot%\System32\drivers\etc\hosts"
 set "hostsUrl=https://raw.githubusercontent.com/MuXolotl/MuZap/main/.service/hosts"
 set "tempFile=%TEMP%\muzap_hosts_src.txt"
-set "helperExe=%~dp0utils\hosts_manage.exe"
+set "helperExe=%~dp0utils\muzap_hosts.exe"
 
 if not exist "!helperExe!" (
-    call :PrintRed "hosts_manage.exe not found in utils folder."
+    call :PrintRed "muzap_hosts.exe not found in utils folder."
     pause
     goto menu_updates
 )
@@ -1279,7 +1279,7 @@ if !errorlevel! neq 0 (
 echo Updating MuZap section in system hosts...
 "!helperExe!" --no-pause --hosts-file "%hostsFile%" --marker-name "MuZap" update --source-file "%tempFile%"
 if !errorlevel! neq 0 (
-    call :PrintRed "Hosts update failed (hosts_manage.exe returned error)."
+    call :PrintRed "Hosts update failed (muzap_hosts.exe returned error)."
     if exist "%tempFile%" del /f /q "%tempFile%"
     pause
     goto menu_updates
@@ -1299,10 +1299,10 @@ goto menu_updates
 cls
 
 set "hostsFile=%SystemRoot%\System32\drivers\etc\hosts"
-set "helperExe=%~dp0utils\hosts_manage.exe"
+set "helperExe=%~dp0utils\muzap_hosts.exe"
 
 if not exist "!helperExe!" (
-    call :PrintRed "hosts_manage.exe not found in utils folder."
+    call :PrintRed "muzap_hosts.exe not found in utils folder."
     pause
     goto menu_updates
 )
@@ -1310,7 +1310,7 @@ if not exist "!helperExe!" (
 echo Removing MuZap section from system hosts...
 "!helperExe!" --no-pause --hosts-file "%hostsFile%" --marker-name "MuZap" remove
 if !errorlevel! neq 0 (
-    call :PrintRed "Hosts remove failed (hosts_manage.exe returned error)."
+    call :PrintRed "Hosts remove failed (muzap_hosts.exe returned error)."
     pause
     goto menu_updates
 )
