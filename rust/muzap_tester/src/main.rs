@@ -20,7 +20,7 @@ use runner::{restore_winws_snapshot, stop_zapret, take_winws_snapshot, wait_for_
 use telemetry::send_telemetry;
 use ui::{ask_config_selection, ask_mode, ask_test_type, TestMode, TestType};
 
-// Переиспользуем общий вывод из muzap_core (чтобы остальные модули могли звать crate::print_colored_tag)
+// Переиспользуем общий вывод из muzap_core
 pub use muzap_core::print::{print_colored_inline, print_colored_tag};
 
 // ─── Структуры результатов ────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ fn run() -> Result<(), AppError> {
 
     if runner::is_muzap_service_running() {
         return Err(AppError::msg(
-            "Служба MuZap запущена. Удалите её через MuZap.bat → Сервис → Удалить, затем запустите тест снова.",
+            "Служба MuZap запущена.\n\nОстановите/удалите её в MuZap.exe → Служба → Удалить,\nзатем запустите тест снова.",
         ));
     }
 
@@ -267,7 +267,7 @@ fn run() -> Result<(), AppError> {
         print_colored_tag(
             "[Телеметрия]",
             Color::DarkGrey,
-            "Отключена. Включите в настройках MuZap для отправки результатов.",
+            "Отключена. Включите в MuZap.exe → Настройки для отправки результатов.",
         );
     }
 
@@ -376,7 +376,7 @@ fn check_admin() -> Result<(), AppError> {
     {
         if !muzap_core::win::elevation::is_elevated() {
             return Err(AppError::msg(
-                "Требуются права администратора. Запустите через MuZap.bat.",
+                "Требуются права администратора.\nЗапустите MuZap.exe от имени администратора (или через ярлык/контекстное меню).",
             ));
         }
     }
@@ -386,7 +386,6 @@ fn check_admin() -> Result<(), AppError> {
 // ─── Пауза ────────────────────────────────────────────────────────────────────
 
 fn pause() {
-    // Явно выключаем raw-режим и показываем курсор перед ожиданием Enter
     let _ = crossterm::terminal::disable_raw_mode();
     let _ = crossterm::execute!(io::stdout(), crossterm::cursor::Show);
 
@@ -414,7 +413,6 @@ pub enum AppError {
     #[error("{0}")]
     Msg(String),
 
-    // tokio::io::Error это псевдоним std::io::Error, поэтому одного варианта достаточно
     #[error("Ошибка ввода/вывода: {0}")]
     Io(#[from] io::Error),
 }

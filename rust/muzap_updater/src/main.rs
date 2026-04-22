@@ -191,6 +191,10 @@ fn real_main() -> AppResult<()> {
 
     // best-effort остановки
     stop_service_best_effort("MuZap");
+    kill_process_best_effort("muzap_service.exe");
+    kill_process_best_effort("muzap_service");
+    kill_process_best_effort("MuZap.exe");
+    kill_process_best_effort("MuZap");
     kill_process_best_effort("winws.exe");
     kill_process_best_effort("winws");
 
@@ -252,8 +256,6 @@ fn real_main() -> AppResult<()> {
 
     println!();
     print_ok("Обновление завершено успешно.");
-    print_info("Если MuZap.bat был обновлён — он применится при следующем запуске (через .service\\MuZap.bat.pending).");
-
     Ok(())
 }
 
@@ -289,12 +291,8 @@ fn parse_args() -> AppResult<Args> {
                     .ok_or_else(|| AppError::Msg("Ожидалось значение после --timeout".into()))?;
                 timeout_sec = v.parse::<u64>().unwrap_or(30);
             }
-            "--no-pause" => {
-                // обрабатывается в main()
-            }
-            "--help" | "-h" => {
-                // обрабатывается в main()
-            }
+            "--no-pause" => {}
+            "--help" | "-h" => {}
             _ => {
                 return Err(AppError::Msg(format!(
                     "Неизвестный аргумент: {a}\nИспользуйте --help"
@@ -333,12 +331,10 @@ fn print_help() {
 }
 
 fn detect_root_dir() -> PathBuf {
-    // Предпочтительно: общий поиск корня через muzap_core (по наличию muzap.ini)
     if let Ok(found) = muzap_core::paths::detect_root(10) {
         return found;
     }
 
-    // Fallback: папка exe
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
     exe.parent().unwrap_or(Path::new(".")).to_path_buf()
 }
@@ -495,9 +491,18 @@ fn apply_update(root: &Path, extracted_root: &Path) -> AppResult<()> {
         .ok()
         .and_then(|p| p.file_name().map(|x| x.to_string_lossy().to_string()));
 
+    // Что защищаем от перезаписи:
+    // - muzap.ini (настройки)
+    // - выбранная стратегия
+    // - user-листы
+    // - ipset-all.txt (пользователь мог обновлять/менять режим; лучше не затирать)
+    // - ipset backup/test-backup
     let protected = [
         "muzap.ini",
-        "muzap.bat",
+        ".service/selected_strategy.txt",
+        "lists/ipset-all.txt",
+        "lists/ipset-all.txt.backup",
+        "lists/ipset-all.test-backup.txt",
         "lists/ipset-exclude-user.txt",
         "lists/list-general-user.txt",
         "lists/list-exclude-user.txt",
@@ -532,16 +537,7 @@ fn apply_update(root: &Path, extracted_root: &Path) -> AppResult<()> {
 
         let is_protected = protected.iter().any(|p| rel_norm.eq_ignore_ascii_case(p));
         if is_protected {
-            if rel_norm.eq_ignore_ascii_case("muzap.bat") {
-                let pending = service_dir.join("MuZap.bat.pending");
-                fs::copy(&src, &pending)?;
-                print_info(&format!(
-                    "Обновление MuZap.bat отложено: {}",
-                    pending.display()
-                ));
-            } else {
-                print_info(&format!("Пропуск (защищено): {rel_norm}"));
-            }
+            print_info(&format!("Пропуск (защищено): {rel_norm}"));
             continue;
         }
 
@@ -698,7 +694,6 @@ fn ask_yes_no_tui(question: &str, hint: &str, default_yes: bool) -> AppResult<bo
 
     clear_pending_events();
 
-    // 0 = Да, 1 = Нет
     let mut selection: usize = if default_yes { 0 } else { 1 };
     let mut warning: Option<&'static str> = None;
 
@@ -714,14 +709,13 @@ fn ask_yes_no_tui(question: &str, hint: &str, default_yes: bool) -> AppResult<bo
     loop {
         if event::poll(Duration::from_millis(250))? {
             if let Event::Key(KeyEvent { code, kind, .. }) = event::read()? {
-                // Игнорируем Release, иначе Up/Down переключит туда-сюда
                 if kind == KeyEventKind::Release {
                     continue;
                 }
 
                 match code {
                     KeyCode::Up | KeyCode::Down => {
-                        selection = 1 - selection; // 0<->1
+                        selection = 1 - selection;
                         warning = None;
                         rerender_menu(&mut stdout, selection, warning)?;
                     }
@@ -772,7 +766,6 @@ fn rerender_menu(
     selection: usize,
     warning: Option<&'static str>,
 ) -> io::Result<()> {
-    // Всегда печатаем ровно 3 строки: Да/Нет/предупреждение.
     execute!(stdout, cursor::MoveUp(3), cursor::MoveToColumn(0))?;
     execute!(stdout, Clear(ClearType::FromCursorDown))?;
     render_menu(stdout, selection, warning)
