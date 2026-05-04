@@ -15,6 +15,7 @@ cloudflarestatus.com
 cloudflarestorage.com
 cloudflarestream.com
 cloudflaretest.com
+cloudfront.net
 dis.gd
 discord-attachments-uploads-prd.storage.googleapis.com
 discord.app
@@ -39,6 +40,8 @@ discordpartygames.com
 discordsays.com
 discordsez.com
 discordstatus.com
+google.ru
+gstatic.com
 frankerfacez.com
 ffzap.com
 betterttv.net
