@@ -1,19 +1,21 @@
 @echo off
+chcp 65001 >nul
+
 if "%1%" == "del" (
-    echo DELETE WINDIVERT DRIVER
-    sc delete windivert
-    sc stop windivert
-    goto :end
+	echo УДАЛЕНИЕ ДРАЙВЕРА WINDIVERT
+	sc stop windivert
+	sc delete windivert
+	goto :end
 )
 
 sc qc windivert
 if errorlevel 1 goto :end
 
 echo.
-choice /C YN /M "Do you want to stop and delete windivert (y/n)? " /D N /T 30
-
+choice /C YN /M "Хотите остановить и удалить WinDivert?"
 if ERRORLEVEL 2 goto :eof
-wscript tools\elevator.vbs "%0" del
+
+"%~dp0elevator" "%~f0" del
 goto :eof
 
 :end
